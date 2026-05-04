@@ -1,49 +1,38 @@
 @import "tailwindcss";
 
-@theme inline {
-  /* Vigilant Academic – Design System */
-  --color-bg: #11131b;
-  --color-surface: #1e1f27;
-  --color-surface-low: #1a1b23;
-  --color-surface-high: #282932;
-  --color-surface-highest: #33343d;
-  --color-surface-variant: #33343d;
-  --color-border: #434655;
-  --color-outline: #8e90a0;
-
-  --color-on-surface: #e2e1ed;
-  --color-on-surface-variant: #c4c5d7;
-
-  --color-primary: #b7c4ff;
-  --color-primary-container: #1d4ed8;
-  --color-on-primary: #002682;
-
-  --color-secondary: #d2bbff;
-  --color-secondary-container: #6001d1;
-
-  --color-tertiary: #6bd8cb;
-  --color-tertiary-container: #00685f;
-
-  --color-error: #ffb4ab;
-  --color-error-container: #93000a;
-
-  /* Student identity colors */
-  --color-clemente: #1d4ed8;
-  --color-raimundo: #7c3aed;
-  --color-shared: #0d9488;
-
-  --font-sans: "Inter", system-ui, sans-serif;
+/* Vigilant Academic – Design Tokens */
+:root {
+  --bg: #11131b;
+  --surface: #1e1f27;
+  --surface-high: #282932;
+  --surface-variant: #33343d;
+  --border: #434655;
+  --outline: #8e90a0;
+  --on-surface: #e2e1ed;
+  --on-surface-dim: #c4c5d7;
+  --primary: #b7c4ff;
+  --primary-container: #1d4ed8;
+  --secondary: #d2bbff;
+  --tertiary: #6bd8cb;
+  --error: #ffb4ab;
+  --error-container: #93000a;
+  --clemente: #1d4ed8;
+  --raimundo: #7c3aed;
+  --shared: #0d9488;
 }
 
-body {
-  background-color: #11131b;
+html, body {
+  background-color: #11131b !important;
   color: #e2e1ed;
+  min-height: 100%;
   -webkit-tap-highlight-color: transparent;
 }
 
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
   user-select: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .hide-scrollbar::-webkit-scrollbar { display: none; }
