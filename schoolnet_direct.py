@@ -2,8 +2,18 @@
 schoolnet_direct.py - Extractor directo de SchoolNet SIN browser_use/LLM.
 Usa Playwright para leer JSON directamente del body de cada sección.
 
-Las páginas /conducta, /agenda, /horario devuelven JSON crudo en el body.
-/calificaciones renderiza HTML → extrae tabla vía DOM.
+Todas las páginas (/calificaciones, /conducta, /agenda, /horario) devuelven
+JSON crudo en el body — no hay HTML que parsear.
+
+Estructura JSON real (descubierta 2026-05-04):
+  /calificaciones → dict columnar: {nombre: [], nf: [], gprom: [], esmadre: [], ...}
+  /conducta       → array de anotaciones o {encConducta: {anotaciones: []}}
+  /agenda         → {eventAgenda: [...]} con campo ordenalumn para filtrar por alumno
+  /horario        → {dia_1: {h1: [...], h2: [...]}, definiciones: ["Bloque 1 | HH:MM-HH:MM", ...]}
+
+Student switching: el servidor es session-based. Después del login la sesión
+apunta al primer alumno (alumno=0). Para cambiar al segundo se navega a /index
+(Angular UI) y se hace click en el tab del alumno por nombre.
 
 Uso:
     python schoolnet_direct.py
@@ -26,8 +36,8 @@ BROWSER_DATA_DIR = OUTPUT_DIR / ".browser_session"
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 
 STUDENTS = [
-    {"index": 0, "id": "alum0", "nombre": "Clemente Aravena", "curso": "6D"},
-    {"index": 1, "id": "alum1", "nombre": "Raimundo Aravena", "curso": "4A"},
+    {"index": 0, "id": "alum0", "nombre": "Clemente Aravena", "nombre_corto": "CLEMENTE", "curso": "6D"},
+    {"index": 1, "id": "alum1", "nombre": "Raimundo Aravena", "nombre_corto": "RAIMUNDO", "curso": "4A"},
 ]
 
 DAY_MAP = {
@@ -68,74 +78,146 @@ async def wait_for_json_body(page, timeout_ms: int = 10000) -> dict | list | Non
     return None
 
 
-async def select_student(page, student: dict) -> bool:
-    """Clicks the parent dropdown then the student option."""
+async def api_fetch(page, path: str) -> dict | list | None:
+    """
+    Calls a SchoolNet JSON API endpoint using fetch() from within the Angular page context.
+    This is required because with a valid session the server returns Angular HTML for direct
+    browser navigation, but returns JSON for AJAX (XHR) requests — same as the Angular app.
+    """
+    url = f"{BASE_URL}/{path.lstrip('/')}"
     try:
-        # Open the dropdown (shows parent account name)
-        opened = False
-        for sel in ["div.linkAlumnos", ".selector-alumno"]:
-            loc = page.locator(sel)
-            if await loc.count() > 0:
-                await loc.first.click()
-                await page.wait_for_timeout(600)
-                opened = True
-                break
-        if not opened:
-            # Try finding by parent account name text
-            loc = page.locator("a, div").filter(has_text="MANUEL ALEJANDRO").first
-            if await loc.count() > 0:
-                await loc.click()
-                await page.wait_for_timeout(600)
+        result = await page.evaluate(f"""async () => {{
+            const r = await fetch('{url}', {{
+                method: 'GET',
+                headers: {{
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }},
+                credentials: 'same-origin'
+            }});
+            if (!r.ok) return null;
+            const text = await r.text();
+            try {{ return JSON.parse(text); }} catch(e) {{ return null; }}
+        }}""")
+        return result
+    except Exception as e:
+        print(f"[WARN] api_fetch({path}): {e}")
+        return None
 
-        # Click the specific student option
-        opt = page.locator(f"#{student['id']}")
-        if await opt.count() > 0:
-            await opt.click()
-            await page.wait_for_timeout(2500)
-            print(f"[OK] Seleccionado: {student['nombre']}")
+
+async def switch_student(page, student: dict) -> bool:
+    """
+    Switches student using the jQuery SPA mechanism:
+    1. Click #linkcalificaciones to trigger $.ajax and render the student dropdown
+    2. Click #alum1 (or #alum0) in the rendered dropdown
+    3. Verify via api_fetch
+    Fallback: set 'rel' cookie directly via SubCookieUtil.seteaCookie()
+    """
+    idx = student["index"]
+    student_id = student["id"]  # "alum0" or "alum1"
+    nombre_corto = student["nombre_corto"]
+    print(f"[INFO] Switching a {nombre_corto} (idx={idx})...")
+
+    # Strategy 1: set cookie directly + re-trigger section load
+    try:
+        await page.evaluate(f"SubCookieUtil.seteaCookie('rel', '{idx}')")
+        print(f"[INFO] Cookie 'rel' seteada a {idx}")
+        # Verify
+        data = await api_fetch(page, "/calificaciones")
+        if data and isinstance(data, dict) and data.get("alumno") == idx:
+            print(f"[OK] Switch via cookie: alumno={idx}")
             return True
     except Exception as e:
-        print(f"[WARN] select_student({student['nombre']}): {e}")
+        print(f"[WARN] Cookie strategy: {e}")
+
+    # Strategy 2: click nav item to render section, then click student tab
+    try:
+        # Click Calificaciones nav item to trigger jQuery AJAX + render UI
+        nav = page.locator("#linkcalificaciones")
+        if await nav.count() > 0:
+            await nav.click()
+            await page.wait_for_timeout(3000)
+            print(f"[INFO] Clicked #linkcalificaciones, esperando dropdown...")
+
+            # Now try clicking the student tab (#alum0, #alum1)
+            tab = page.locator(f"#{student_id}")
+            if await tab.count() > 0 and await tab.is_visible():
+                await tab.click()
+                await page.wait_for_timeout(2000)
+                print(f"[OK] Click en #{student_id}")
+                # Verify
+                data = await api_fetch(page, "/calificaciones")
+                if data and isinstance(data, dict):
+                    actual = data.get("alumno")
+                    print(f"[INFO] alumno={actual} (esperado={idx})")
+                    if str(actual) == str(idx):
+                        print(f"[OK] Switch verificado: alumno={actual}")
+                        return True
+            else:
+                print(f"[WARN] #{student_id} no visible — buscando por nombre...")
+                tab2 = page.locator(f"text={nombre_corto}").first
+                if await tab2.count() > 0:
+                    await tab2.click()
+                    await page.wait_for_timeout(2000)
+                    data = await api_fetch(page, "/calificaciones")
+                    if data and isinstance(data, dict) and str(data.get("alumno")) == str(idx):
+                        return True
+    except Exception as e:
+        print(f"[WARN] Nav click strategy: {e}")
+
+    # Final check: even if click logic had issues, verify current alumno
+    data = await api_fetch(page, "/calificaciones")
+    if data and isinstance(data, dict) and str(data.get("alumno")) == str(idx):
+        print(f"[OK] Switch confirmado en fallback: alumno={data.get('alumno')}")
+        return True
+
+    print(f"[WARN] No se pudo hacer switch a {nombre_corto}")
     return False
 
 
-async def extract_notas_html(page) -> list[dict]:
-    """Extracts grades from the HTML table in /calificaciones via DOM."""
-    return await page.evaluate("""() => {
-        const notas = [];
-        document.querySelectorAll('tr').forEach(row => {
-            const cells = Array.from(row.querySelectorAll('td'));
-            if (cells.length < 3) return;
+def parse_calificaciones_json(data: dict) -> list[dict]:
+    """
+    Parses the columnar JSON from /calificaciones.
+    All fields are parallel arrays indexed by subject row.
+    Only 'esmadre=1' rows are main subjects (skip detail/child rows).
+    """
+    nombres = data.get("nombre", [])
+    nf = data.get("nf", [])
+    gprom = data.get("gprom", [])
+    esmadre = data.get("esmadre", [])
 
-            const asig = cells[0]?.textContent?.trim() || '';
-            if (!asig || asig.length < 2 || /^(Asignatura|ASIGNATURA)$/i.test(asig)) return;
-            // Skip detail rows like "Lenguaje y comunicación. [06-D]"
-            if (/\[\d{2}-[A-Z]\]/.test(asig)) return;
+    def _parse_nota(s) -> float | None:
+        if not s or s in ("", "&nbsp;"):
+            return None
+        try:
+            return float(str(s).replace(",", "."))
+        except (ValueError, TypeError):
+            return None
 
-            // Collect valid grade values (1.0–7.0) from all cells except first
-            const nums = [];
-            cells.slice(1).forEach(c => {
-                const t = c.textContent.trim().replace(',', '.');
-                const n = parseFloat(t);
-                if (!isNaN(n) && n >= 1.0 && n <= 7.0) nums.push(n);
-            });
-            if (nums.length === 0) return;
+    result = []
+    for i, nombre in enumerate(nombres):
+        if not nombre or len(nombre) < 2:
+            continue
+        # Only parent/summary rows (esmadre='1'), skip detail rows
+        if i < len(esmadre) and esmadre[i] != "1":
+            continue
 
-            // Convention: last value = GPROM (course avg), second-to-last = NF (student grade)
-            const promedio_curso = nums[nums.length - 1];
-            const nota = nums.length >= 2 ? nums[nums.length - 2] : null;
+        nota = _parse_nota(nf[i] if i < len(nf) else "")
+        prom = _parse_nota(gprom[i] if i < len(gprom) else "")
 
-            notas.push({
-                asignatura: asig,
-                tipo: 'promedio',
-                nota: nota,
-                promedio_curso: promedio_curso,
-                descripcion: 'Nota Final',
-                fecha: null
-            });
-        });
-        return notas;
-    }""")
+        if nota is None and prom is None:
+            continue
+
+        result.append({
+            "asignatura": nombre,
+            "tipo": "promedio",
+            "nota": nota,
+            "promedio_curso": prom,
+            "descripcion": "Nota Final",
+            "fecha": None,
+        })
+
+    return result
 
 
 def parse_conducta_json(data) -> list[dict]:
@@ -157,7 +239,6 @@ def parse_conducta_json(data) -> list[dict]:
             if obs_list:
                 break
         if not obs_list:
-            # Search any list with "fecha" keys
             for val in data.values():
                 if isinstance(val, list) and val and isinstance(val[0], dict) and "fecha" in val[0]:
                     obs_list = val
@@ -219,38 +300,48 @@ def parse_agenda_json(data, student_index: int) -> list[dict]:
     return result
 
 
-def parse_horario_json(data, student_index: int) -> list[dict]:
-    """Parses /horario JSON body, filtering by student index (ordenalumn)."""
+def parse_horario_json(data: dict, student_index: int) -> list[dict]:
+    """
+    Parses /horario JSON body.
+    dia_X is a DICT {h1: [...], h2: [...]} — NOT a list.
+    definiciones is a LIST ["Bloque 1 | 08:00-08:10", "Bloque 2 | ..."].
+    h-key number (1-based) maps to definiciones index (0-based).
+    The JSON already reflects the selected student (session-based).
+    """
     if not isinstance(data, dict):
         return []
-    definiciones = data.get("definiciones") or {}
+    definiciones = data.get("definiciones") or []  # list of strings
+
     result = []
     for dia_key, dia_name in DAY_MAP.items():
-        bloques = data.get(dia_key) or []
-        if not isinstance(bloques, list):
+        dia_data = data.get(dia_key)
+        if not isinstance(dia_data, dict):
             continue
-        for bloque in bloques:
-            if not isinstance(bloque, dict):
-                continue
-            orden = bloque.get("ordenalumn")
-            if orden is not None and str(orden) != str(student_index):
-                continue
-            h_key = str(bloque.get("hora") or bloque.get("h") or "")
-            h_def = definiciones.get(h_key) or {}
-            if isinstance(h_def, dict):
-                inicio = (h_def.get("inicio") or h_def.get("start") or
-                          h_def.get("horaInicio") or "")
-                fin = (h_def.get("fin") or h_def.get("end") or
-                       h_def.get("horaFin") or "")
-                hora_str = f"{inicio}-{fin}" if inicio else h_key
-            else:
-                hora_str = str(h_def) if h_def else h_key
-            result.append({
-                "dia": dia_name,
-                "hora": hora_str,
-                "asignatura": bloque.get("asignatura") or bloque.get("nombreasignatura") or "",
-                "sala": bloque.get("sala") or bloque.get("room") or "",
-            })
+
+        for h_key, bloque_list in dia_data.items():
+            # h_key = "h1", "h2", "h10" etc. → 1-based index into definiciones
+            try:
+                h_num = int(h_key.lstrip("h")) - 1  # h1 → index 0
+                if isinstance(definiciones, list) and 0 <= h_num < len(definiciones):
+                    hora_str = str(definiciones[h_num])
+                else:
+                    hora_str = h_key
+            except (ValueError, IndexError):
+                hora_str = h_key
+
+            if not isinstance(bloque_list, list):
+                bloque_list = [bloque_list] if bloque_list else []
+
+            for bloque in bloque_list:
+                if not isinstance(bloque, dict):
+                    continue
+                result.append({
+                    "dia": dia_name,
+                    "hora": hora_str,
+                    "asignatura": bloque.get("asig") or bloque.get("asignatura") or "",
+                    "sala": bloque.get("sala") or "",
+                })
+
     return result
 
 
@@ -278,33 +369,81 @@ async def main():
         page.set_default_timeout(30000)
 
         # === LOGIN ===
-        print("[INFO] Navegando a login...")
-        await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+        # Navigate to a protected JSON endpoint first — if session active we get JSON,
+        # if not the server redirects to login.
+        print("[INFO] Verificando sesión...")
+        await page.goto(f"{BASE_URL}/calificaciones", wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(2000)
 
         need_login = "login" in page.url.lower() or await page.locator("#btn_login").count() > 0
         if need_login:
-            print("[INFO] Ingresando credenciales...")
-            # Try common field selectors
-            for sel in ['input[name="usuario"]', 'input[type="text"]']:
-                if await page.locator(sel).count() > 0:
-                    await page.fill(sel, user)
-                    break
-            await page.fill('input[type="password"]', password)
-            await page.click("#btn_login")
+            print("[INFO] Sesión expirada, ingresando credenciales...")
+            if login_url:
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(1500)
+            # Try specific name selectors first, then first visible text input
+            # Fill username: try specific selectors then any visible text input
+            filled = False
+            for sel in ['input[name="usuario"]', 'input[name="rut"]', 'input[name="username"]',
+                        'input[id="rut"]', 'input[id="usuario"]']:
+                loc = page.locator(sel)
+                try:
+                    if await loc.count() > 0 and await loc.first.is_visible():
+                        await loc.first.fill(user)
+                        filled = True
+                        print(f"[INFO] Usuario llenado via {sel}")
+                        break
+                except Exception:
+                    continue
+            if not filled:
+                # Fallback: all visible text inputs, skip hidden ones
+                inputs = page.locator('input[type="text"]')
+                cnt = await inputs.count()
+                for i in range(cnt):
+                    inp = inputs.nth(i)
+                    try:
+                        if await inp.is_visible():
+                            await inp.fill(user)
+                            filled = True
+                            print(f"[INFO] Usuario llenado via text input #{i}")
+                            break
+                    except Exception:
+                        continue
+            if not filled:
+                print("[WARN] No se encontró campo de usuario visible — intentando igual")
+
+            # Fill password
+            pw_loc = page.locator('input[type="password"]:visible')
+            if await pw_loc.count() > 0:
+                await pw_loc.first.fill(password)
+            else:
+                await page.locator('input[type="password"]').first.fill(password)
+
+            # Click login button — use JS click as fallback if Playwright times out
+            try:
+                await page.locator("#btn_login").click(timeout=15000)
+            except Exception:
+                print("[INFO] Click normal falló, usando JS click...")
+                try:
+                    await page.evaluate("document.getElementById('btn_login').click()")
+                except Exception:
+                    pass  # Context destroyed = navigation happened = login OK
             await page.wait_for_timeout(4000)
             await page.wait_for_load_state("domcontentloaded", timeout=20000)
             print(f"[INFO] URL post-login: {page.url}")
         else:
             print("[INFO] Sesión ya activa")
 
+        # Stay on /index so Angular context is active for api_fetch()
+        await page.goto(f"{BASE_URL}/index", wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+        print(f"[INFO] Angular cargado en: {page.url}")
+
+
         result = {
             "extraido_en": datetime.now().isoformat(),
             "alumnos": [],
         }
-
-        # Fetch horario once (JSON contains all students via ordenalumn)
-        horario_data_all = None
 
         for student in STUDENTS:
             nombre = student["nombre"]
@@ -322,77 +461,65 @@ async def main():
                 "horario": [],
             }
 
-            # --- CALIFICACIONES (HTML table) ---
+            # Always verify/switch to correct student
+            await switch_student(page, student)
+
+            # --- CALIFICACIONES (AJAX via api_fetch) ---
             try:
                 print(f"[INFO] Calificaciones...")
-                await page.goto(f"{BASE_URL}/calificaciones", wait_until="domcontentloaded")
-                await page.wait_for_timeout(2000)
-                await select_student(page, student)
-                notas = await extract_notas_html(page)
-                alumno["notas"] = notas
-                print(f"[OK] Notas: {len(notas)}")
+                data = await api_fetch(page, "/calificaciones")
+                if data and isinstance(data, dict):
+                    alumno_actual = data.get("alumno")
+                    if str(alumno_actual) != str(idx):
+                        print(f"[WARN] alumno={alumno_actual}, esperado={idx}")
+                    notas = parse_calificaciones_json(data)
+                    alumno["notas"] = notas
+                    print(f"[OK] Notas: {len(notas)}")
+                else:
+                    print("[WARN] Calificaciones: sin datos")
             except Exception as e:
                 print(f"[WARN] Calificaciones: {e}")
 
-            # --- CONDUCTA (JSON body, session carries student selection) ---
+            # --- CONDUCTA ---
             try:
                 print(f"[INFO] Conducta...")
-                await page.goto(f"{BASE_URL}/conducta", wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)
-                data = await wait_for_json_body(page, timeout_ms=8000)
+                data = await api_fetch(page, "/conducta")
                 if data:
                     anotaciones = parse_conducta_json(data)
                     alumno["anotaciones"] = anotaciones
                     print(f"[OK] Anotaciones: {len(anotaciones)}")
                 else:
-                    print("[WARN] Conducta: sin JSON en body")
+                    print("[WARN] Conducta: sin datos")
             except Exception as e:
                 print(f"[WARN] Conducta: {e}")
 
-            # --- AGENDA (JSON body with ordenalumn filter) ---
+            # --- AGENDA ---
             try:
                 print(f"[INFO] Agenda...")
-                await page.goto(f"{BASE_URL}/agenda", wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)
-                data = await wait_for_json_body(page, timeout_ms=8000)
+                data = await api_fetch(page, "/agenda")
                 if data:
                     agenda = parse_agenda_json(data, idx)
                     alumno["agenda"] = agenda
                     print(f"[OK] Agenda: {len(agenda)}")
                 else:
-                    print("[WARN] Agenda: sin JSON en body")
+                    print("[WARN] Agenda: sin datos")
             except Exception as e:
                 print(f"[WARN] Agenda: {e}")
 
-            # --- HORARIO (JSON body, fetch once, filter per student) ---
+            # --- HORARIO ---
             try:
-                if horario_data_all is None:
-                    print(f"[INFO] Horario (fetching once)...")
-                    await page.goto(f"{BASE_URL}/horario", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(3000)
-                    horario_data_all = await wait_for_json_body(page, timeout_ms=8000)
-
-                if horario_data_all:
-                    horario = parse_horario_json(horario_data_all, idx)
+                print(f"[INFO] Horario...")
+                data = await api_fetch(page, "/horario")
+                if data and isinstance(data, dict):
+                    horario = parse_horario_json(data, idx)
                     alumno["horario"] = horario
                     print(f"[OK] Horario: {len(horario)} bloques")
                 else:
-                    print("[WARN] Horario: sin JSON en body")
+                    print("[WARN] Horario: sin datos")
             except Exception as e:
                 print(f"[WARN] Horario: {e}")
 
             result["alumnos"].append(alumno)
-
-            # Switch student for next iteration: go back to calificaciones and switch
-            # (session carries student selection to conducta/agenda)
-            if idx < len(STUDENTS) - 1:
-                next_student = STUDENTS[idx + 1]
-                try:
-                    await page.goto(f"{BASE_URL}/calificaciones", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)
-                    await select_student(page, next_student)
-                except Exception:
-                    pass
 
         await ctx.close()
 
@@ -401,10 +528,10 @@ async def main():
     out_file.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\n[OK] Guardado: {out_file}")
     for a in result["alumnos"]:
-        print(f"     {a['nombre']}: notas={len(a.get('notas',[]))} "
-              f"anotaciones={len(a.get('anotaciones',[]))} "
-              f"agenda={len(a.get('agenda',[]))} "
-              f"horario={len(a.get('horario',[]))}")
+        print(f"     {a['nombre']}: notas={len(a.get('notas', []))} "
+              f"anotaciones={len(a.get('anotaciones', []))} "
+              f"agenda={len(a.get('agenda', []))} "
+              f"horario={len(a.get('horario', []))}")
 
     # Push to Supabase
     try:
