@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import RefreshButton from './RefreshButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +86,14 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-5 mt-4">
+
+      {/* HEADER ROW */}
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: '#8e90a0' }}>
+          {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
+        <RefreshButton />
+      </div>
 
       {/* STATS BAR */}
       <section>
