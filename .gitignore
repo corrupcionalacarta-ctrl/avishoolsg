@@ -1,0 +1,52 @@
+# SECRETOS - NUNCA SUBIR
+.env
+.env.*
+*.env
+
+# DATOS PERSONALES - NUNCA SUBIR
+gmail_dump_*.json
+gmail_debug_*.json
+classroom_dump*.json
+classroom_raw_*.txt
+schoolnet_dump.json
+schoolnet_grades_*.json
+schoolnet_raw_*.txt
+digest_*.html
+digest_*.json
+digest_raw_*.txt
+classroom_class*_raw_*.txt
+pdfs/
+
+# SESION DEL NAVEGADOR
+.browser_session/
+.classroom_state.json
+
+# LOGS
+*.log
+run_all_*.log
+run_all_stdout_*.log
+classroom_run.log
+bot.log
+
+# PYTHON
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# NODE / NEXT.JS
+node_modules/
+.next/
+.vercel/
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+=2.3.0
+.claude/
