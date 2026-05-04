@@ -454,8 +454,16 @@ async def extract_schoolnet_grades(llm):
     )
     print(f"[INFO] Extrayendo notas y anotaciones de SchoolNet para {alumno}...")
     try:
-        result = await agent.run(max_steps=80)
+        result = await agent.run(max_steps=120)
         output = result.final_result() if hasattr(result, "final_result") else str(result)
+        # Fallback: buscar JSON en extracted_content si final_result no lo tiene
+        if not parse_json_from_output(output):
+            if hasattr(result, "extracted_content") and callable(result.extracted_content):
+                extracted = result.extracted_content()
+                if extracted:
+                    combined = " ".join(str(e) for e in extracted)
+                    if parse_json_from_output(combined):
+                        output = combined
         parsed = parse_json_from_output(output)
         if parsed:
             grades_file = OUTPUT_DIR / f"schoolnet_grades_{datetime.now().strftime('%Y%m%d')}.json"
