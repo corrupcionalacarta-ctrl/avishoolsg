@@ -130,27 +130,53 @@ REGLAS DURAS:
 }}
 """
 
+BASE_URL = "https://schoolnet.colegium.com/webapp/es_CL"
+
 SCHOOLNET_GRADES_TASK = """
-Tarea: extraer información completa de SchoolNet para DOS alumnos: Clemente Aravena (6°D) y Raimundo Aravena (4°A).
+Tarea: extraer datos de SchoolNet (Colegium) para Clemente Aravena (6D) y Raimundo Aravena (4A).
 
-Pasos:
-1. Navega a {url}
-2. Loguea con usuario "{user}" y password (sensitive: schoolnet_password).
-3. Si hay selector de alumno, extrae la info de Clemente primero, luego cambia a Raimundo.
-4. Para CADA alumno extrae:
-   a) NOTAS / CALIFICACIONES: todas las notas visibles por asignatura, tipo, valor, promedio del curso, descripción, fecha.
-   b) ANOTACIONES / CONDUCTA / LIBRO DE CLASES: fecha, tipo (positiva/negativa/observación), descripción, asignatura.
-   c) AGENDA / TAREAS PENDIENTES: fecha, descripción, asignatura.
-   d) HORARIO DE CLASES si está disponible: día, hora, asignatura, sala.
-   e) ASISTENCIA: % asistencia general si está visible.
-   f) COMUNICACIONES / CIRCULARES recientes: título, fecha, contenido breve.
-5. Llama a "done" con el JSON final.
+== PASO 1: LOGIN ==
+Navega a {url}
+Ingresa usuario "{user}" y password (sensitive: schoolnet_password). Haz click en ingresar.
+Espera a que cargue la página de inicio (verás el menú lateral).
 
-REGLAS DURAS:
-- NO crees archivos. NO envíes formularios. NO cambies nada.
-- Extrae TODO lo que veas en pantalla, no omitas datos.
-- Si una sección no tiene datos, deja el array vacío.
-- Tu respuesta DEBE ser SOLO este JSON válido (sin markdown):
+== PASO 2: CALIFICACIONES (repite para cada alumno) ==
+2a. Navega a {base_url}/calificaciones
+2b. Si hay selector de alumno arriba (dropdown con nombre), selecciona "CLEMENTE".
+2c. Espera que cargue la tabla de notas. Extrae TODAS las filas visibles de la tabla:
+    - columnas típicas: asignatura, descripción de evaluación, nota, promedio curso, fecha.
+    - NO hagas click en detalles individuales. Solo extrae la tabla visible.
+2d. Repite: selecciona "RAIMUNDO" y extrae su tabla de notas.
+
+== PASO 3: OBSERVACIONES / CONDUCTA ==
+3a. Navega a {base_url}/observaciones
+3b. Selecciona "CLEMENTE" si hay selector. Extrae todas las observaciones/anotaciones visibles:
+    - fecha, tipo (positiva/negativa/observación), descripción, asignatura/profesor.
+3c. Repite con "RAIMUNDO".
+Si observaciones no carga, intenta {base_url}/conducta con el mismo proceso.
+
+== PASO 4: AGENDA ==
+4a. Navega a {base_url}/agenda
+4b. Cambia a vista "Lista" o "Semana" si está disponible (más fácil de extraer).
+4c. Filtra por "CLEMENTE" si hay selector y extrae todos los ítems visibles (fecha, descripción, asignatura).
+4d. Filtra por "RAIMUNDO" y extrae sus ítems.
+Si no hay filtro, extrae todos los ítems indicando a qué alumno pertenece cada uno.
+
+== PASO 5: HORARIO ==
+5a. Navega a {base_url}/horario
+5b. Selecciona "CLEMENTE" si hay selector. Extrae la grilla del horario: día, hora inicio-fin, asignatura, sala.
+5c. Repite con "RAIMUNDO".
+
+== REGLAS ESTRICTAS ==
+- NO hagas click en botones "Detalle", "Cerrar", "Ver más" ni modales. Solo la tabla/lista principal.
+- NO navegues a páginas de pago, matrículas, salud ni configuración.
+- NO crees archivos. Solo lee y extrae lo visible.
+- Cuando una sección no tiene datos, deja el array vacío [].
+- Extrae NÚMEROS tal como aparecen (ej: 6.5, no "6,5").
+- Si una URL da error 404 o "sin acceso", márcala como vacía y continúa.
+
+== RESPUESTA FINAL ==
+Tu respuesta DEBE ser SOLO este JSON válido (absolutamente nada más, ni texto, ni markdown):
 
 {{
   "extraido_en": "ISO timestamp",
@@ -166,12 +192,12 @@ REGLAS DURAS:
           "nota": 6.5,
           "promedio_curso": 5.8,
           "descripcion": "...",
-          "fecha": "YYYY-MM-DD o descriptiva"
+          "fecha": "YYYY-MM-DD"
         }}
       ],
       "anotaciones": [
         {{
-          "fecha": "YYYY-MM-DD o descriptiva",
+          "fecha": "YYYY-MM-DD",
           "tipo": "positiva|negativa|observacion",
           "descripcion": "...",
           "asignatura": "..."
@@ -186,17 +212,10 @@ REGLAS DURAS:
       ],
       "horario": [
         {{
-          "dia": "lunes|martes|...",
+          "dia": "lunes|martes|miercoles|jueves|viernes",
           "hora": "08:00-08:45",
           "asignatura": "...",
           "sala": "..."
-        }}
-      ],
-      "comunicaciones": [
-        {{
-          "fecha": "...",
-          "titulo": "...",
-          "resumen": "..."
         }}
       ]
     }},
@@ -207,8 +226,7 @@ REGLAS DURAS:
       "notas": [],
       "anotaciones": [],
       "agenda": [],
-      "horario": [],
-      "comunicaciones": []
+      "horario": []
     }}
   ]
 }}
@@ -447,7 +465,7 @@ async def extract_schoolnet_grades(llm):
 
     session = make_browser_session()
     agent = Agent(
-        task=SCHOOLNET_GRADES_TASK.format(url=url, user=user, alumno=alumno),
+        task=SCHOOLNET_GRADES_TASK.format(url=url, user=user, alumno=alumno, base_url=BASE_URL),
         llm=llm,
         browser_session=session,
         sensitive_data={"schoolnet_password": password},
@@ -469,9 +487,11 @@ async def extract_schoolnet_grades(llm):
             grades_file = OUTPUT_DIR / f"schoolnet_grades_{datetime.now().strftime('%Y%m%d')}.json"
             grades_file.write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"[OK] Notas guardadas en {grades_file}")
-            print(f"     Notas:       {len(parsed.get('notas', []))}")
-            print(f"     Anotaciones: {len(parsed.get('anotaciones', []))}")
-            print(f"     Agenda:      {len(parsed.get('agenda', []))}")
+            for alumno in parsed.get("alumnos", []):
+                nombre = alumno.get("nombre", "?")
+                print(f"     {nombre}: notas={len(alumno.get('notas',[]))}"
+                      f" anotaciones={len(alumno.get('anotaciones',[]))}"
+                      f" agenda={len(alumno.get('agenda',[]))}")
 
             # Push a Supabase
             from supabase_push import push_grades
