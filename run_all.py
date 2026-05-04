@@ -97,7 +97,7 @@ def step_schoolnet() -> bool:
 
 def step_grades() -> bool:
     """Extrae notas y anotaciones de SchoolNet (1 vez al día, solo morning)."""
-    return run_step("grades", [PYTHON, str(HERE / "schoolnet_extractor.py"), "--only", "grades"], timeout=900)
+    return run_step("grades", [PYTHON, str(HERE / "schoolnet_direct.py")], timeout=600)
 
 
 def step_digest(run_mode: str = "manual") -> bool:
