@@ -109,13 +109,22 @@ def normalize_items() -> list[dict]:
     if schoolnet:
         for nombre, sec in schoolnet.get("secciones", {}).items():
             for it in sec.get("items", []):
-                items.append({
-                    "source": "schoolnet",
-                    "fecha": it.get("fecha", ""),
-                    "titulo": f"[{nombre}] {it.get('titulo', '')}",
-                    "autor": "",
-                    "contenido": str(it)[:600],
-                })
+                if isinstance(it, dict):
+                    items.append({
+                        "source": "schoolnet",
+                        "fecha": it.get("fecha", ""),
+                        "titulo": f"[{nombre}] {it.get('titulo', it.get('descripcion', ''))}",
+                        "autor": "",
+                        "contenido": str(it)[:600],
+                    })
+                else:
+                    items.append({
+                        "source": "schoolnet",
+                        "fecha": "",
+                        "titulo": f"[{nombre}]",
+                        "autor": "",
+                        "contenido": str(it)[:600],
+                    })
 
     return items
 

@@ -228,8 +228,9 @@ def make_browser_session():
         headless=HEADLESS,
         user_data_dir=str(BROWSER_DATA_DIR),
         keep_alive=True,
+        timeout=60000,
     )
-    return BrowserSession(browser_profile=profile)
+    return BrowserSession(browser_profile=profile, is_local=True)
 
 
 def parse_json_from_output(text: str) -> dict | None:
@@ -312,7 +313,7 @@ async def list_classroom_classes(llm) -> list[dict]:
             print(output[:500])
             return []
     finally:
-        await session.close()
+        await session.stop()
 
 
 async def extract_one_class(class_index: int, llm):
@@ -362,7 +363,7 @@ async def extract_one_class(class_index: int, llm):
             raw_file.write_text(output or "(empty)", encoding="utf-8")
             print(f"\n[WARN] No se parseo JSON. Output crudo: {raw_file}")
     finally:
-        await session.close()
+        await session.stop()
 
 
 async def continue_classroom(llm, max_per_run: int = 1):
@@ -408,7 +409,20 @@ async def extract_schoolnet(llm):
     print(f"[INFO] Procesando SchoolNet ({url})")
     try:
         result = await agent.run(max_steps=60)
-        output = result.final_result() if hasattr(result, "final_result") else str(result)
+        # browser_use 0.12+: intentar varias formas de obtener el output
+        output = None
+        if hasattr(result, "final_result") and callable(result.final_result):
+            output = result.final_result()
+        # Si final_result no tiene JSON, buscar en extracted_content
+        if output and not parse_json_from_output(output):
+            if hasattr(result, "extracted_content") and callable(result.extracted_content):
+                extracted = result.extracted_content()
+                if extracted:
+                    combined = " ".join(str(e) for e in extracted)
+                    if parse_json_from_output(combined):
+                        output = combined
+        if not output:
+            output = str(result)
         parsed = parse_json_from_output(output)
         if parsed:
             SCHOOLNET_DUMP.write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -418,7 +432,7 @@ async def extract_schoolnet(llm):
             raw.write_text(output or "", encoding="utf-8")
             print(f"[WARN] Sin JSON. Crudo: {raw}")
     finally:
-        await session.close()
+        await session.stop()
 
 
 async def extract_schoolnet_grades(llm):
@@ -459,7 +473,7 @@ async def extract_schoolnet_grades(llm):
             raw.write_text(output or "", encoding="utf-8")
             print(f"[WARN] Sin JSON. Crudo: {raw}")
     finally:
-        await session.close()
+        await session.stop()
 
 
 # ===== MAIN =====

@@ -119,14 +119,14 @@ def main():
     results = {}
 
     if args.morning:
-        results["gmail"] = step_gmail(hours=24)
+        results["gmail"] = step_gmail(hours=168)  # 7 días
         results["schoolnet"] = step_schoolnet()
         results["grades"] = step_grades()
         results["classroom"] = step_classroom_pending(max_per_run=5)
     elif args.evening:
-        results["gmail"] = step_gmail(hours=12)
+        results["gmail"] = step_gmail(hours=168)  # 7 días
     elif args.gmail_only:
-        results["gmail"] = step_gmail(hours=12)
+        results["gmail"] = step_gmail(hours=168)  # 7 días
 
     # Digest siempre, aunque algun extractor haya fallado
     run_mode = "morning" if args.morning else "evening" if args.evening else "manual"
