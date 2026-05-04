@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import Link from "next/link";
 import "./globals.css";
+import NavBar from "./NavBar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -21,18 +21,28 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className={`${inter.className} bg-slate-900 text-slate-100 min-h-full antialiased`}>
+      <body className={`${inter.className} min-h-full antialiased`}
+        style={{ backgroundColor: '#11131b', color: '#e2e1ed' }}>
+
         {/* Header fijo */}
-        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-14 bg-slate-900 border-b border-slate-700">
+        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-14"
+          style={{ backgroundColor: '#11131b', borderBottom: '1px solid #434655' }}>
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-white text-sm font-bold">
-              A
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
+              style={{ backgroundColor: '#1d4ed8' }}>
+              <svg viewBox="0 0 64 64" width="20" height="20">
+                <rect x="17" y="24" width="30" height="26" rx="8" fill="white"/>
+                <rect x="22" y="30" width="8" height="6" rx="2" fill="#1d4ed8"/>
+                <rect x="34" y="30" width="8" height="6" rx="2" fill="#1d4ed8"/>
+                <rect x="26" y="42" width="12" height="3" rx="1.5" fill="#1d4ed8"/>
+              </svg>
             </div>
-            <h1 className="text-base font-bold text-slate-50 tracking-tight">AVI School</h1>
+            <h1 className="text-base font-bold tracking-tight" style={{ color: '#e2e1ed' }}>AVI School</h1>
           </div>
-          <Link href="/chat" className="text-slate-400 hover:bg-slate-800 transition-colors p-2 rounded-lg">
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>chat</span>
-          </Link>
+          <span className="text-[12px] font-semibold uppercase tracking-widest px-2 py-1 rounded"
+            style={{ backgroundColor: '#1e1f27', color: '#6bd8cb' }}>
+            {new Date().toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </span>
         </header>
 
         {/* Contenido */}
@@ -40,17 +50,8 @@ export default function RootLayout({
           {children}
         </main>
 
-        {/* Bottom nav fijo */}
-        <nav className="fixed bottom-0 w-full z-50 flex justify-around items-center h-16 bg-slate-900 border-t border-slate-700">
-          <Link href="/dashboard" className="flex flex-col items-center justify-center text-blue-400 gap-0.5">
-            <span className="material-symbols-outlined" style={{ fontSize: 22 }}>dashboard</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Briefing</span>
-          </Link>
-          <Link href="/chat" className="flex flex-col items-center justify-center text-slate-500 hover:text-blue-300 gap-0.5 transition-colors">
-            <span className="material-symbols-outlined" style={{ fontSize: 22 }}>chat</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider">Chat</span>
-          </Link>
-        </nav>
+        {/* Bottom nav */}
+        <NavBar />
       </body>
     </html>
   );
