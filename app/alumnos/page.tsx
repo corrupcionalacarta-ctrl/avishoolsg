@@ -1,130 +1,237 @@
 import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
 const ALUMNOS = [
-  { nombre: 'Clemente Aravena', curso: '6°D', color: '#1d4ed8', initial: 'C' },
-  { nombre: 'Raimundo Aravena', curso: '4°A', color: '#7c3aed', initial: 'R' },
+  { slug: 'clemente', nombre: 'Clemente Aravena', curso: '6°D', color: '#1e3a8a', colorLight: '#eff6ff', border: '#bfdbfe' },
+  { slug: 'raimundo', nombre: 'Raimundo Aravena', curso: '4°A', color: '#7c3aed', colorLight: '#faf5ff', border: '#e9d5ff' },
 ]
 
-function NoteColor(nota: number | null) {
-  if (!nota) return '#8e90a0'
-  if (nota >= 6) return '#6bd8cb'
-  if (nota >= 5) return '#d2bbff'
-  return '#ffb4ab'
+type AsistenciaRow = { alumno: string; asistencia_pct: number | null; prof_jefe: string | null }
+type NotaRow = { alumno: string | null; nota: number | null }
+type AnotRow = { alumno: string | null; tipo: string | null }
+type AnalisisRow = { alumno: string; nivel_alerta: string | null; tendencia_academica: string | null; tendencia_conducta: string | null; resumen: string | null }
+type FechaRow = { alumno: string | null; fecha_evento: string; titulo: string }
+
+function alertaColor(nivel: string | null) {
+  if (nivel === 'alto') return '#ef4444'
+  if (nivel === 'medio') return '#d97706'
+  return '#0d9488'
+}
+
+function tendenciaIcon(t: string | null) {
+  if (t === 'mejorando') return { icon: 'trending_up', color: '#0d9488' }
+  if (t === 'descendiendo') return { icon: 'trending_down', color: '#ef4444' }
+  return { icon: 'trending_flat', color: '#94a3b8' }
+}
+
+function promedioColor(p: string | null) {
+  if (!p) return '#94a3b8'
+  const n = parseFloat(p)
+  if (n >= 6) return '#0d9488'
+  if (n >= 5) return '#d97706'
+  return '#ef4444'
 }
 
 export default async function AlumnosPage() {
-  const [{ data: notas }, { data: anotaciones }] = await Promise.all([
-    supabase
-      .from('notas')
-      .select('alumno, asignatura, nota, promedio_curso, descripcion, fecha')
-      .order('extraido_en', { ascending: false })
-      .limit(60),
-    supabase
-      .from('anotaciones')
-      .select('alumno, fecha, tipo, descripcion, asignatura')
-      .order('fecha', { ascending: false })
-      .limit(40),
+  const hoy = new Date().toISOString().split('T')[0]
+  const en14 = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().split('T')[0]
+
+  const [asistRes, notasRes, anotRes, analisisRes, fechasRes] = await Promise.all([
+    supabase.from('asistencia').select('alumno, asistencia_pct, prof_jefe'),
+    supabase.from('notas').select('alumno, nota').order('extraido_en', { ascending: false }).limit(60),
+    supabase.from('anotaciones').select('alumno, tipo').order('fecha', { ascending: false }).limit(60),
+    supabase.from('analisis_alumno').select('alumno, nivel_alerta, tendencia_academica, tendencia_conducta, resumen').order('generado_en', { ascending: false }).limit(4),
+    supabase.from('items_colegio').select('alumno, fecha_evento, titulo').eq('categoria', 'fecha_proxima').gte('fecha_evento', hoy).lte('fecha_evento', en14).order('fecha_evento'),
   ])
 
-  return (
-    <div className="space-y-6 mt-4">
-      <h1 className="text-[24px] font-bold tracking-tight" style={{ color: '#e2e1ed' }}>Alumnos</h1>
+  const asistencia = (asistRes.data ?? []) as AsistenciaRow[]
+  const todasNotas = (notasRes.data ?? []) as NotaRow[]
+  const todasAnot = (anotRes.data ?? []) as AnotRow[]
+  const analisisAll = (analisisRes.data ?? []) as AnalisisRow[]
+  const todasFechas = (fechasRes.data ?? []) as FechaRow[]
 
-      {ALUMNOS.map(({ nombre, curso, color, initial }) => {
-        const notasAlumno = (notas ?? []).filter(n => n.alumno === nombre)
-        const anotAlumno = (anotaciones ?? []).filter(a => a.alumno === nombre)
-        const promedio = notasAlumno.filter(n => n.nota).length > 0
-          ? (notasAlumno.filter(n => n.nota).reduce((s, n) => s + n.nota, 0) / notasAlumno.filter(n => n.nota).length).toFixed(1)
-          : null
+  const analisisByAlumno: Record<string, AnalisisRow> = {}
+  for (const a of analisisAll) {
+    const key = a.alumno.split(' ')[0].toLowerCase()
+    if (!analisisByAlumno[key]) analisisByAlumno[key] = a
+  }
+
+  function statsAlumno(slug: string) {
+    const asist = asistencia.find(a => a.alumno.toLowerCase().includes(slug)) ?? null
+    const notas = todasNotas.filter(n => (n.alumno ?? '').toLowerCase().includes(slug) && n.nota)
+    const promedio = notas.length
+      ? (notas.reduce((s, n) => s + (n.nota ?? 0), 0) / notas.length).toFixed(1)
+      : null
+    const anot = todasAnot.filter(a => (a.alumno ?? '').toLowerCase().includes(slug))
+    const negativas = anot.filter(a => a.tipo === 'negativa').length
+    const positivas = anot.filter(a => a.tipo === 'positiva').length
+    const fechas = todasFechas.filter(f => !f.alumno || (f.alumno ?? '').toLowerCase().includes(slug))
+    const analisis = analisisByAlumno[slug] ?? null
+    return { asist, promedio, negativas, positivas, fechas, analisis }
+  }
+
+  return (
+    <div className="space-y-4 mt-4">
+
+      <div>
+        <h1 className="text-[20px] font-bold" style={{ color: '#1e293b' }}>Mis hijos</h1>
+        <p className="text-[12px] mt-0.5" style={{ color: '#94a3b8' }}>
+          Saint George · {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
+      </div>
+
+      {ALUMNOS.map(({ slug, nombre, curso, color, colorLight, border }) => {
+        const { asist, promedio, negativas, positivas, fechas, analisis } = statsAlumno(slug)
+        const acad = tendenciaIcon(analisis?.tendencia_academica ?? null)
+        const cond = tendenciaIcon(analisis?.tendencia_conducta ?? null)
 
         return (
-          <section key={nombre} className="space-y-3">
-            {/* Header alumno */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-                style={{ backgroundColor: color }}>
-                {initial}
+          <Link key={slug} href={`/dashboard/${slug}`}
+            className="block rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
+            style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.08)', border: `1px solid ${border}` }}>
+
+            {/* Header azul/morado */}
+            <div className="px-4 py-4 flex items-center gap-3" style={{ backgroundColor: color }}>
+              {/* Avatar inicial */}
+              <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-[18px] flex-shrink-0"
+                style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff', border: '2px solid rgba(255,255,255,0.5)' }}>
+                {nombre.charAt(0)}
               </div>
-              <div>
-                <h2 className="text-[18px] font-semibold leading-tight" style={{ color: '#e2e1ed' }}>{nombre.split(' ')[0]}</h2>
-                <p className="text-[12px]" style={{ color: '#8e90a0' }}>{curso} · Saint George</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-bold text-[16px] leading-tight">{nombre.split(' ')[0]}</p>
+                <p className="text-[12px] leading-tight" style={{ color: 'rgba(255,255,255,0.75)' }}>{curso} · Colegio Saint George</p>
+                {asist?.prof_jefe && (
+                  <p className="text-[11px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                    Prof. Jefe: {asist.prof_jefe}
+                  </p>
+                )}
               </div>
-              {promedio && (
-                <div className="ml-auto text-right">
-                  <p className="text-[28px] font-bold leading-none tracking-tight" style={{ color: NoteColor(parseFloat(promedio)) }}>{promedio}</p>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#8e90a0' }}>Prom.</p>
-                </div>
-              )}
+              <span className="material-symbols-outlined" style={{ color: 'rgba(255,255,255,0.6)', fontSize: 22 }}>chevron_right</span>
             </div>
 
-            {/* Notas */}
-            {notasAlumno.length > 0 && (
-              <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #434655' }}>
-                <div className="px-4 py-2.5 flex items-center gap-2" style={{ backgroundColor: '#282932' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#d2bbff' }}>grade</span>
-                  <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#d2bbff' }}>Notas</p>
+            {/* Stats en 3 columnas */}
+            <div className="grid grid-cols-3" style={{ backgroundColor: colorLight }}>
+              {[
+                {
+                  valor: asist?.asistencia_pct != null ? `${asist.asistencia_pct}%` : '—',
+                  label: 'Asistencia',
+                  valColor: asist?.asistencia_pct != null && asist.asistencia_pct < 90 ? '#ef4444' : color,
+                },
+                {
+                  valor: promedio ?? '—',
+                  label: 'Promedio',
+                  valColor: promedioColor(promedio),
+                },
+                {
+                  valor: String(fechas.length),
+                  label: 'Próx. fechas',
+                  valColor: fechas.length > 0 ? '#d97706' : '#94a3b8',
+                },
+              ].map((stat, i) => (
+                <div key={i} className="py-3 text-center" style={{ borderRight: i < 2 ? `1px solid ${border}` : undefined }}>
+                  <p className="text-[20px] font-bold leading-tight" style={{ color: stat.valColor }}>{stat.valor}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: '#94a3b8' }}>{stat.label}</p>
                 </div>
-                <div className="divide-y" style={{ backgroundColor: '#1e1f27', borderColor: '#434655' }}>
-                  {notasAlumno.slice(0, 8).map((n, i) => {
-                    const pct = n.nota ? Math.round((n.nota / 7) * 100) : 0
-                    return (
-                      <div key={i} className="px-4 py-3 flex items-center gap-3">
-                        <span className="text-[20px] font-bold w-10 text-right flex-shrink-0 leading-none"
-                          style={{ color: NoteColor(n.nota) }}>{n.nota ?? '–'}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-medium truncate" style={{ color: '#e2e1ed' }}>{n.asignatura}</p>
-                          {n.descripcion && <p className="text-[11px] truncate" style={{ color: '#8e90a0' }}>{n.descripcion}</p>}
-                          <div className="mt-1.5 w-full rounded-full h-0.5" style={{ backgroundColor: '#33343d' }}>
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: NoteColor(n.nota) }} />
-                          </div>
-                        </div>
-                        {n.promedio_curso && (
-                          <span className="text-[11px] flex-shrink-0" style={{ color: '#8e90a0' }}>prom {n.promedio_curso}</span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+              ))}
+            </div>
 
-            {/* Anotaciones */}
-            {anotAlumno.length > 0 && (
-              <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #434655' }}>
-                <div className="px-4 py-2.5 flex items-center gap-2" style={{ backgroundColor: '#282932' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#b7c4ff' }}>edit_note</span>
-                  <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#b7c4ff' }}>Anotaciones</p>
-                </div>
-                <div className="divide-y" style={{ backgroundColor: '#1e1f27', borderColor: '#434655' }}>
-                  {anotAlumno.slice(0, 5).map((a, i) => {
-                    const dotColor = a.tipo === 'positiva' ? '#6bd8cb' : a.tipo === 'negativa' ? '#ffb4ab' : '#8e90a0'
-                    return (
-                      <div key={i} className="px-4 py-3 flex items-start gap-3">
-                        <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: dotColor }} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px]" style={{ color: '#e2e1ed' }}>{a.descripcion}</p>
-                          <div className="flex gap-2 mt-1">
-                            {a.asignatura && <span className="text-[11px]" style={{ color: '#8e90a0' }}>{a.asignatura}</span>}
-                            {a.fecha && <span className="text-[11px]" style={{ color: '#434655' }}>{a.fecha}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+            {/* Cuerpo */}
+            <div className="px-4 py-3 space-y-2.5" style={{ backgroundColor: '#ffffff' }}>
 
-            {notasAlumno.length === 0 && anotAlumno.length === 0 && (
-              <div className="rounded-xl p-6 text-center" style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
-                <p className="text-[13px]" style={{ color: '#434655' }}>Sin datos aún</p>
+              {/* Conducta */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-semibold" style={{ color: '#94a3b8' }}>Conducta:</span>
+                {positivas > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold"
+                    style={{ backgroundColor: '#d1fae5', color: '#059669' }}>
+                    {positivas} positiva{positivas !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {negativas > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold"
+                    style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
+                    {negativas} negativa{negativas !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {positivas === 0 && negativas === 0 && (
+                  <span className="text-[11px]" style={{ color: '#cbd5e1' }}>Sin registros</span>
+                )}
               </div>
-            )}
-          </section>
+
+              {/* Próximas fechas (primeras 2) */}
+              {fechas.length > 0 && (
+                <div className="space-y-1">
+                  {fechas.slice(0, 2).map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[12px]">
+                      <span className="material-symbols-outlined flex-shrink-0" style={{ fontSize: 14, color: '#d97706' }}>event</span>
+                      <span style={{ color: '#64748b' }}>{f.fecha_evento}:</span>
+                      <span className="truncate font-medium" style={{ color: '#1e293b' }}>{f.titulo}</span>
+                    </div>
+                  ))}
+                  {fechas.length > 2 && (
+                    <p className="text-[11px]" style={{ color: '#94a3b8' }}>+{fechas.length - 2} más…</p>
+                  )}
+                </div>
+              )}
+
+              {/* Tendencias IA */}
+              {analisis && (
+                <div className="flex items-center gap-3 flex-wrap pt-2 border-t" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined" style={{ fontSize: 15, color: acad.color, fontVariationSettings: "'FILL' 1" }}>{acad.icon}</span>
+                    <span className="text-[11px]" style={{ color: '#64748b' }}>Académico</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined" style={{ fontSize: 15, color: cond.color, fontVariationSettings: "'FILL' 1" }}>{cond.icon}</span>
+                    <span className="text-[11px]" style={{ color: '#64748b' }}>Conducta</span>
+                  </div>
+                  {analisis.nivel_alerta && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold"
+                      style={{ backgroundColor: alertaColor(analisis.nivel_alerta) + '18', color: alertaColor(analisis.nivel_alerta) }}>
+                      Alerta {analisis.nivel_alerta}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Resumen IA */}
+              {analisis?.resumen && (
+                <p className="text-[12px] leading-[1.5] line-clamp-2" style={{ color: '#475569' }}>{analisis.resumen}</p>
+              )}
+
+            </div>
+
+          </Link>
         )
       })}
+
+      {/* Acciones rápidas */}
+      <div className="pt-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: '#cbd5e1' }}>Acciones</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Link href="/chat"
+            className="rounded-xl p-3.5 flex items-center gap-3"
+            style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe' }}>
+            <span className="material-symbols-outlined" style={{ color: '#1e3a8a', fontSize: 20, fontVariationSettings: "'FILL' 1" }}>chat_bubble</span>
+            <div>
+              <p className="text-[13px] font-bold" style={{ color: '#1e3a8a' }}>Preguntar</p>
+              <p className="text-[10px]" style={{ color: '#64748b' }}>Consulta a la IA</p>
+            </div>
+          </Link>
+          <Link href="/estudiar"
+            className="rounded-xl p-3.5 flex items-center gap-3"
+            style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+            <span className="material-symbols-outlined" style={{ color: '#059669', fontSize: 20, fontVariationSettings: "'FILL' 1" }}>menu_book</span>
+            <div>
+              <p className="text-[13px] font-bold" style={{ color: '#059669' }}>Estudiar</p>
+              <p className="text-[10px]" style={{ color: '#64748b' }}>Guías y material</p>
+            </div>
+          </Link>
+        </div>
+      </div>
+
     </div>
   )
 }
