@@ -74,12 +74,23 @@ def normalize_items() -> list[dict]:
     gmail = latest_gmail_dump()
     if gmail:
         for m in gmail.get("mails", []):
+            # Usar cuerpo completo (hasta 2000 chars) en lugar de solo preview
+            contenido = (m.get("body_full") or m.get("preview") or "")[:2000]
+
+            # Agregar resúmenes de PDFs adjuntos — aquí viene info clave:
+            # ropa, colación, autorizaciones, materiales, etc.
+            adjuntos = m.get("adjuntos") or []
+            for adj in adjuntos:
+                resumen_pdf = (adj.get("resumen") or "").strip()
+                if resumen_pdf:
+                    contenido += f"\n\n[PDF adjunto: {adj.get('nombre', '')}]\n{resumen_pdf}"
+
             items.append({
                 "source": "gmail",
                 "fecha": m.get("fecha", "")[:10],
                 "titulo": m.get("asunto", ""),
                 "autor": m.get("de", ""),
-                "contenido": m.get("preview", "")[:600],
+                "contenido": contenido[:3000],
             })
 
     # Classroom
