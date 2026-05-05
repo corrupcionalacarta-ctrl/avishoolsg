@@ -259,17 +259,19 @@ def parse_conducta_json(data) -> list[dict]:
         else:
             tipo = "observacion"
 
-        motivo = obs.get("motivo", "") or ""
+        motivo = (obs.get("motivo", "") or "").strip()
         detalle = (obs.get("obs", "") or "").strip()
+        # Store motivo as titulo, obs detail as descripcion
         if detalle and detalle not in ("\xa0", " ", ""):
-            desc = f"{motivo} - {detalle}"
+            desc = detalle
         else:
-            desc = motivo
+            desc = ""
 
         result.append({
             "fecha": parse_fecha(obs.get("fecha")),
             "tipo": tipo,
-            "descripcion": desc.strip(),
+            "titulo": motivo,
+            "descripcion": desc,
             "asignatura": obs.get("nombreasignatura") or "",
         })
     return result
@@ -298,6 +300,44 @@ def parse_agenda_json(data, student_index: int) -> list[dict]:
             "asignatura": str(asig),
         })
     return result
+
+
+def parse_asistencia_json(data) -> dict:
+    """Extracts attendance percentage and counts from /asistencia JSON."""
+    if not data:
+        return {}
+    if isinstance(data, dict):
+        # Look for common field names
+        for key in ["porcentaje", "pct", "asistencia_pct", "porcentajeAsistencia"]:
+            val = data.get(key)
+            if val is not None:
+                try:
+                    return {"asistencia_pct": float(str(val).replace(",", "."))}
+                except (ValueError, TypeError):
+                    pass
+        # Try to compute from horas_efectuadas / inasistencias
+        total = None
+        inasist = None
+        for k in ["totalHorasEfectuadas", "horas_efectuadas", "horasEfectuadas", "total"]:
+            v = data.get(k)
+            if v is not None:
+                try:
+                    total = float(v)
+                    break
+                except (ValueError, TypeError):
+                    pass
+        for k in ["totalInasistencias", "inasistencias", "horasInasistidas"]:
+            v = data.get(k)
+            if v is not None:
+                try:
+                    inasist = float(v)
+                    break
+                except (ValueError, TypeError):
+                    pass
+        if total and total > 0 and inasist is not None:
+            pct = round((total - inasist) / total * 100, 1)
+            return {"asistencia_pct": pct, "horas_efectuadas": int(total), "inasistencias": int(inasist)}
+    return {}
 
 
 def parse_horario_json(data: dict, student_index: int) -> list[dict]:
@@ -455,6 +495,8 @@ async def main():
                 "nombre": nombre,
                 "curso": curso,
                 "asistencia_pct": None,
+                "inasistencias": None,
+                "horas_efectuadas": None,
                 "notas": [],
                 "anotaciones": [],
                 "agenda": [],
@@ -505,6 +547,24 @@ async def main():
                     print("[WARN] Agenda: sin datos")
             except Exception as e:
                 print(f"[WARN] Agenda: {e}")
+
+            # --- ASISTENCIA ---
+            try:
+                print(f"[INFO] Asistencia...")
+                data = await api_fetch(page, "/asistencia")
+                if data:
+                    asist = parse_asistencia_json(data)
+                    if asist.get("asistencia_pct") is not None:
+                        alumno["asistencia_pct"] = asist["asistencia_pct"]
+                        alumno["inasistencias"] = asist.get("inasistencias")
+                        alumno["horas_efectuadas"] = asist.get("horas_efectuadas")
+                        print(f"[OK] Asistencia: {asist['asistencia_pct']}%")
+                    else:
+                        print("[WARN] Asistencia: sin porcentaje reconocible")
+                else:
+                    print("[WARN] Asistencia: sin datos")
+            except Exception as e:
+                print(f"[WARN] Asistencia: {e}")
 
             # --- HORARIO ---
             try:

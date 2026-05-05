@@ -6,9 +6,6 @@ import CalendarioFechas from '../CalendarioFechas'
 export const dynamic = 'force-dynamic'
 
 const DIAS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes']
-const DIAS_LABEL: Record<string, string> = {
-  lunes: 'Lun', martes: 'Mar', miercoles: 'Mié', jueves: 'Jue', viernes: 'Vie'
-}
 
 type NotaRow = {
   asignatura: string
@@ -41,6 +38,12 @@ type HorarioRow = {
   tipo: string
 }
 
+type AsistenciaRow = {
+  asistencia_pct: number | null
+  inasistencias: number | null
+  horas_efectuadas: number | null
+}
+
 const ALUMNOS: Record<string, { nombre: string; curso: string; color: string; initial: string }> = {
   clemente: { nombre: 'Clemente Aravena', curso: '6° D', color: '#1e3a8a', initial: 'C' },
   raimundo: { nombre: 'Raimundo Aravena', curso: '4° A', color: '#7c3aed', initial: 'R' },
@@ -58,6 +61,75 @@ function diaHoy(): string {
   return dias[new Date().getDay()]
 }
 
+// SVG Gauge for conduct (semicircle 180°)
+function ConductaGauge({
+  positivas, negativas, observaciones, color,
+}: { positivas: number; negativas: number; observaciones: number; color: string }) {
+  const total = positivas + negativas + observaciones
+  if (total === 0) return null
+
+  // Semicircle arc helper (r=40, center=50,50, start at left=180°, end at right=0°)
+  const R = 40
+  const cx = 50
+  const cy = 52
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const arcPath = (startDeg: number, endDeg: number) => {
+    const start = { x: cx + R * Math.cos(toRad(startDeg)), y: cy + R * Math.sin(toRad(startDeg)) }
+    const end = { x: cx + R * Math.cos(toRad(endDeg)), y: cy + R * Math.sin(toRad(endDeg)) }
+    const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0
+    return `M ${start.x} ${start.y} A ${R} ${R} 0 ${large} 1 ${end.x} ${end.y}`
+  }
+
+  // Map values to degrees (180° = left, 0° = right, going clockwise from left through bottom)
+  const posAngle = (positivas / total) * 180
+  const negAngle = (negativas / total) * 180
+  const obsAngle = (observaciones / total) * 180
+
+  // Draw from 180° to 0°, clockwise (so add angles left→right)
+  const seg1End = 180 - posAngle
+  const seg2End = seg1End - negAngle
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <svg viewBox="0 0 100 56" width="140" height="80">
+        {/* Background arc */}
+        <path d={arcPath(180, 0)} fill="none" stroke="#f1f5f9" strokeWidth="10" strokeLinecap="round" />
+        {/* Observaciones arc (gray) */}
+        {observaciones > 0 && (
+          <path d={arcPath(180, seg2End - obsAngle)} fill="none" stroke="#cbd5e1" strokeWidth="10" strokeLinecap="round" />
+        )}
+        {/* Negativas arc (red) */}
+        {negativas > 0 && (
+          <path d={arcPath(180, seg1End)} fill="none" stroke="#ef4444" strokeWidth="10" strokeLinecap="round" />
+        )}
+        {/* Positivas arc (green) */}
+        {positivas > 0 && (
+          <path d={arcPath(180, 180 - posAngle)} fill="none" stroke="#0d9488" strokeWidth="10" strokeLinecap="round" />
+        )}
+        {/* Center text */}
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="16" fontWeight="700" fill="#1e293b">{total}</text>
+        <text x={cx} y={cy + 8} textAnchor="middle" fontSize="7" fill="#94a3b8">registros</text>
+      </svg>
+
+      {/* Legend */}
+      <div className="flex gap-3 text-center">
+        <div>
+          <p className="text-[18px] font-bold" style={{ color: '#0d9488' }}>{positivas}</p>
+          <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#0d9488' }}>Positivas</p>
+        </div>
+        <div>
+          <p className="text-[18px] font-bold" style={{ color: '#94a3b8' }}>{observaciones}</p>
+          <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#94a3b8' }}>Neutras</p>
+        </div>
+        <div>
+          <p className="text-[18px] font-bold" style={{ color: '#ef4444' }}>{negativas}</p>
+          <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#ef4444' }}>Negativas</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default async function AlumnoPage({ params }: { params: Promise<{ alumno: string }> }) {
   const { alumno: slugRaw } = await params
   const slug = slugRaw.toLowerCase()
@@ -68,7 +140,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
   const primerNombre = alumno.nombre.split(' ')[0]
   const diaActual = diaHoy()
 
-  const [notasRes, fechasRes, anotacionesRes, horarioRes] = await Promise.all([
+  const [notasRes, fechasRes, anotacionesRes, horarioRes, asistenciaRes] = await Promise.all([
     supabase
       .from('notas')
       .select('asignatura, tipo, nota, promedio_curso, descripcion')
@@ -94,6 +166,11 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
       .select('dia, bloque, hora_inicio, hora_fin, asignatura, sala, tipo')
       .ilike('alumno', `%${primerNombre}%`)
       .order('bloque', { ascending: true }),
+    supabase
+      .from('asistencia')
+      .select('asistencia_pct, inasistencias, horas_efectuadas')
+      .ilike('alumno', `%${primerNombre}%`)
+      .maybeSingle(),
   ])
 
   const notas = (notasRes.data as NotaRow[] ?? [])
@@ -105,6 +182,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
     })
   const anotaciones = (anotacionesRes.data as AnotacionRow[] ?? [])
   const horarioRaw = (horarioRes.data as HorarioRow[] ?? [])
+  const asistencia = (asistenciaRes.data as AsistenciaRow | null)
 
   const negativas = anotaciones.filter(a => a.tipo === 'negativa')
   const positivas = anotaciones.filter(a => a.tipo === 'positiva')
@@ -120,7 +198,6 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
     notasPorAsignatura[n.asignatura].push(n)
   }
 
-  // Horario por día
   const horarioPorDia: Record<string, HorarioRow[]> = {}
   for (const dia of DIAS) horarioPorDia[dia] = []
   for (const h of horarioRaw) {
@@ -137,7 +214,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
   return (
     <div className="space-y-5 mt-4">
 
-      {/* HEADER con tabs */}
+      {/* SELECTOR ALUMNOS */}
       <div className="flex items-center justify-between gap-2">
         <p className="text-[12px] font-semibold uppercase tracking-widest shrink-0" style={{ color: '#94a3b8' }}>
           {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -158,22 +235,46 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
       </div>
 
       {/* PERFIL */}
-      <section className="rounded-xl p-5 flex items-center gap-4"
-        style={{ backgroundColor: '#ffffff', border: `1px solid ${alumno.color}33`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-        <div className="w-14 h-14 rounded-full flex items-center justify-center text-[24px] font-bold text-white flex-shrink-0"
-          style={{ backgroundColor: alumno.color }}>
-          {alumno.initial}
-        </div>
-        <div className="flex-1">
-          <h1 className="text-[20px] font-bold" style={{ color: '#1e293b' }}>{alumno.nombre}</h1>
-          <p className="text-[13px]" style={{ color: '#94a3b8' }}>{alumno.curso} — Colegio Georgian</p>
-        </div>
-        {promedio && (
-          <div className="text-center">
-            <p className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: '#94a3b8' }}>Promedio</p>
-            <p className="text-[32px] font-bold leading-tight" style={{ color: notaColor(parseFloat(promedio)) }}>
-              {promedio}
+      <section className="rounded-xl overflow-hidden"
+        style={{ backgroundColor: alumno.color, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+        <div className="p-5 flex items-center gap-4">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center text-[24px] font-bold flex-shrink-0"
+            style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff' }}>
+            {alumno.initial}
+          </div>
+          <div className="flex-1">
+            <h1 className="text-[20px] font-bold text-white leading-tight">{alumno.nombre}</h1>
+            <p className="text-[13px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>
+              {alumno.curso} · Colegio Georgian
             </p>
+          </div>
+          {promedio && (
+            <div className="text-center px-3 py-2 rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
+              <p className="text-[10px] uppercase tracking-widest font-semibold text-white opacity-75">Prom.</p>
+              <p className="text-[28px] font-bold text-white leading-tight">{promedio}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Stats bar */}
+        {(asistencia?.asistencia_pct || negativas.length > 0 || fechas.length > 0) && (
+          <div className="flex divide-x px-2 pb-3" style={{ borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(0,0,0,0.1)' }}>
+            {asistencia?.asistencia_pct && (
+              <div className="flex-1 text-center py-2">
+                <p className="text-[16px] font-bold text-white">{asistencia.asistencia_pct}%</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.6)' }}>Asistencia</p>
+              </div>
+            )}
+            <div className="flex-1 text-center py-2">
+              <p className="text-[16px] font-bold" style={{ color: negativas.length > 0 ? '#fca5a5' : 'rgba(255,255,255,0.9)' }}>
+                {negativas.length}
+              </p>
+              <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.6)' }}>Anotaciones</p>
+            </div>
+            <div className="flex-1 text-center py-2">
+              <p className="text-[16px] font-bold text-white">{fechas.length}</p>
+              <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.6)' }}>Próx. fechas</p>
+            </div>
           </div>
         )}
       </section>
@@ -185,7 +286,9 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
             <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ef4444' }} />
             <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Anotaciones Negativas</h2>
             <span className="text-[11px] px-2 py-0.5 rounded-full font-bold"
-              style={{ backgroundColor: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5' }}>{negativas.length}</span>
+              style={{ backgroundColor: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5' }}>
+              {negativas.length}
+            </span>
           </div>
           <div className="space-y-2">
             {negativas.map((a, i) => (
@@ -196,7 +299,9 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
                     style={{ color: '#ef4444', fontSize: 16 }}>report</span>
                   <div className="flex-1">
                     {a.titulo && <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{a.titulo}</p>}
-                    {a.descripcion && <p className="text-[12px] mt-0.5 leading-5" style={{ color: '#475569' }}>{a.descripcion}</p>}
+                    {a.descripcion && (
+                      <p className="text-[12px] mt-0.5 leading-5" style={{ color: '#475569' }}>{a.descripcion}</p>
+                    )}
                     {a.fecha && <p className="text-[10px] mt-1" style={{ color: '#94a3b8' }}>{a.fecha}</p>}
                   </div>
                 </div>
@@ -206,29 +311,54 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
         </section>
       )}
 
-      {/* ANOTACIONES POSITIVAS + OBSERVACIONES (colapsables) */}
-      {(positivas.length > 0 || observaciones.length > 0) && (
-        <details className="rounded-xl overflow-hidden"
-          style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-          <summary className="px-4 py-3 cursor-pointer list-none flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ color: '#0d9488', fontSize: 18 }}>check_circle</span>
-              <span className="text-[14px] font-semibold" style={{ color: '#1e293b' }}>
-                Conducta — {positivas.length} positivas · {observaciones.length} observaciones
-              </span>
-            </div>
-            <span className="material-symbols-outlined" style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
-          </summary>
-          <div className="px-4 pb-4 space-y-2" style={{ borderTop: '1px solid #e2e8f0' }}>
-            {[...positivas, ...observaciones].map((a, i) => (
-              <div key={i} className="pt-2">
-                {a.titulo && <p className="text-[13px] font-semibold" style={{ color: '#1e293b' }}>{a.titulo}</p>}
-                {a.descripcion && <p className="text-[12px] mt-0.5" style={{ color: '#94a3b8' }}>{a.descripcion}</p>}
-                {a.fecha && <p className="text-[10px] mt-0.5" style={{ color: '#cbd5e1' }}>{a.fecha}</p>}
-              </div>
-            ))}
+      {/* CONDUCTA — resumen gauge */}
+      {anotaciones.length > 0 && (
+        <section className="rounded-xl p-4 space-y-3"
+          style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined" style={{ color: '#0d9488', fontSize: 18 }}>emoji_events</span>
+            <h2 className="text-[15px] font-semibold" style={{ color: '#1e293b' }}>Registros del estudiante</h2>
           </div>
-        </details>
+
+          <div className="flex items-center justify-center">
+            <ConductaGauge
+              positivas={positivas.length}
+              negativas={negativas.length}
+              observaciones={observaciones.length}
+              color={alumno.color}
+            />
+          </div>
+
+          {/* Positivas + Observaciones (colapsable) */}
+          {(positivas.length > 0 || observaciones.length > 0) && (
+            <details className="rounded-lg overflow-hidden"
+              style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <summary className="px-3 py-2.5 cursor-pointer list-none flex items-center justify-between">
+                <span className="text-[13px] font-semibold" style={{ color: '#475569' }}>
+                  Ver positivas y observaciones
+                </span>
+                <span className="material-symbols-outlined" style={{ color: '#94a3b8', fontSize: 16 }}>expand_more</span>
+              </summary>
+              <div className="px-3 pb-3 space-y-2" style={{ borderTop: '1px solid #e2e8f0' }}>
+                {[...positivas, ...observaciones].map((a, i) => (
+                  <div key={i} className="pt-2">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+                        style={a.tipo === 'positiva'
+                          ? { backgroundColor: '#f0fdf4', color: '#0d9488', border: '1px solid #99f6e4' }
+                          : { backgroundColor: '#f8fafc', color: '#94a3b8', border: '1px solid #e2e8f0' }}>
+                        {a.tipo === 'positiva' ? 'Positiva' : 'Observación'}
+                      </span>
+                      {a.fecha && <span className="text-[10px]" style={{ color: '#cbd5e1' }}>{a.fecha}</span>}
+                    </div>
+                    {a.titulo && <p className="text-[13px] font-semibold" style={{ color: '#1e293b' }}>{a.titulo}</p>}
+                    {a.descripcion && <p className="text-[12px] mt-0.5" style={{ color: '#94a3b8' }}>{a.descripcion}</p>}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
       )}
 
       {/* PRÓXIMAS FECHAS — calendario */}
@@ -243,37 +373,40 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
         <section className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#7c3aed' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Notas por Asignatura</h2>
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Calificaciones</h2>
           </div>
-          <div className="space-y-2">
-            {Object.entries(notasPorAsignatura).map(([asig, notasAsig]) => (
-              <div key={asig} className="rounded-xl p-4"
-                style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{asig}</p>
-                  {notasAsig.length > 1 && (
-                    <p className="text-[11px]" style={{ color: '#94a3b8' }}>{notasAsig.length} notas</p>
-                  )}
-                </div>
-                <div className="flex gap-4 overflow-x-auto hide-scrollbar">
-                  {notasAsig.map((n, i) => (
-                    <div key={i} className="flex-shrink-0 text-center min-w-[48px]">
-                      <p className="text-[24px] font-bold leading-tight" style={{ color: notaColor(n.nota) }}>
-                        {n.nota ?? '–'}
+          <div className="rounded-xl overflow-hidden"
+            style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+            {Object.entries(notasPorAsignatura).map(([asig, notasAsig], idx) => (
+              <div key={asig}
+                style={{ borderTop: idx > 0 ? '1px solid #f1f5f9' : 'none' }}>
+                <div className="px-4 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold truncate" style={{ color: '#1e293b' }}>{asig}</p>
+                    {notasAsig[0]?.promedio_curso && (
+                      <p className="text-[11px]" style={{ color: '#94a3b8' }}>
+                        Promedio curso: {notasAsig[0].promedio_curso}
                       </p>
-                      {n.descripcion && (
-                        <p className="text-[10px] mt-0.5 max-w-[56px] truncate" style={{ color: '#94a3b8' }}>
-                          {n.descripcion}
+                    )}
+                  </div>
+                  <div className="flex gap-3 items-center">
+                    {notasAsig.slice(0, 4).map((n, i) => (
+                      <div key={i} className="text-center">
+                        <p className="text-[20px] font-bold leading-tight" style={{ color: notaColor(n.nota) }}>
+                          {n.nota ?? '–'}
                         </p>
-                      )}
-                    </div>
-                  ))}
+                        {n.descripcion && notasAsig.length > 1 && (
+                          <p className="text-[9px] max-w-[44px] truncate" style={{ color: '#94a3b8' }}>
+                            {n.descripcion}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    {notasAsig.length > 4 && (
+                      <span className="text-[11px]" style={{ color: '#94a3b8' }}>+{notasAsig.length - 4}</span>
+                    )}
+                  </div>
                 </div>
-                {notasAsig[0]?.promedio_curso && (
-                  <p className="text-[11px] mt-3 pt-2" style={{ color: '#94a3b8', borderTop: '1px solid #e2e8f0' }}>
-                    Promedio del curso: {notasAsig[0].promedio_curso}
-                  </p>
-                )}
               </div>
             ))}
           </div>
@@ -300,9 +433,11 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-bold capitalize" style={{ color: esHoy ? '#0d9488' : '#1e293b' }}>
                       {dia.charAt(0).toUpperCase() + dia.slice(1)}
-                      {esHoy && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold"
-                        style={{ backgroundColor: '#f0fdfa', color: '#0d9488' }}>HOY</span>}
                     </span>
+                    {esHoy && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                        style={{ backgroundColor: '#f0fdfa', color: '#0d9488' }}>HOY</span>
+                    )}
                     <span className="text-[11px]" style={{ color: '#94a3b8' }}>
                       {bloques.filter(b => b.tipo === 'clase').length} bloques
                     </span>
@@ -310,12 +445,12 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
                   <span className="material-symbols-outlined" style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
                 </summary>
 
-                <div className="divide-y" style={{ borderColor: '#e2e8f0', borderTop: '1px solid #e2e8f0' }}>
+                <div style={{ borderTop: '1px solid #e2e8f0' }}>
                   {bloques.map((b, i) => {
                     const c = tipoHorarioColor(b.tipo)
                     return (
                       <div key={i} className="px-4 py-2.5 flex items-center gap-3"
-                        style={{ backgroundColor: c.bg }}>
+                        style={{ backgroundColor: c.bg, borderTop: i > 0 ? '1px solid #f8fafc' : 'none' }}>
                         <div className="w-20 flex-shrink-0">
                           {b.hora_inicio && b.hora_fin ? (
                             <p className="text-[11px] font-semibold tabular-nums" style={{ color: '#94a3b8' }}>

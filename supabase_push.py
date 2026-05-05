@@ -138,6 +138,7 @@ def push_grades(data: dict) -> bool:
                     "alumno": nombre,
                     "fecha": _parse_fecha(str(a.get("fecha", "") or "")),
                     "tipo": a.get("tipo", "observacion"),
+                    "titulo": a.get("titulo", ""),
                     "descripcion": a.get("descripcion", ""),
                     "asignatura": a.get("asignatura", ""),
                 } for a in anotaciones]
@@ -181,6 +182,21 @@ def push_grades(data: dict) -> bool:
                     })
                 sb.table("horario").insert(rows).execute()
                 print(f"[OK] {nombre}: {len(rows)} bloques de horario guardados")
+
+            # Asistencia (upsert en tabla asistencia si existe)
+            asistencia_pct = alumno.get("asistencia_pct")
+            if asistencia_pct is not None:
+                try:
+                    sb.table("asistencia").upsert({
+                        "alumno": nombre,
+                        "asistencia_pct": asistencia_pct,
+                        "inasistencias": alumno.get("inasistencias"),
+                        "horas_efectuadas": alumno.get("horas_efectuadas"),
+                        "actualizado_en": datetime.now().isoformat(),
+                    }, on_conflict="alumno").execute()
+                    print(f"[OK] {nombre}: asistencia {asistencia_pct}% guardada")
+                except Exception as e:
+                    print(f"[WARN] asistencia push: {e} (tabla puede no existir aún)")
 
             # Agenda → items_colegio (borrar antes para evitar duplicados)
             agenda = alumno.get("agenda", [])

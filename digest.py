@@ -276,7 +276,7 @@ def section(title: str, color: str, icon: str, items: list[dict], detail_key: st
         return ""
     lis = ""
     for it in items:
-        titulo = it.get("titulo", "(sin titulo)")
+        titulo = it.get("titulo") or it.get("evento", "(sin titulo)")
         detalle = it.get(detail_key, it.get("evento", ""))
         extra = ""
         if "fecha" in it and detail_key == "evento":
