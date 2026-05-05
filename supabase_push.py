@@ -65,7 +65,7 @@ def push_digest(classified: dict, n_items: int, run_mode: str = "manual") -> boo
                 "digest_id": digest_id,
                 "categoria": "fecha_proxima",
                 "titulo": fp.get("evento", ""),
-                "detalle": fp.get("evento", ""),
+                "detalle": fp.get("tipo", ""),   # tipo: prueba|entrega|reunion|evento
                 "fecha_evento": _parse_fecha(fp.get("fecha", "")),
                 "asignatura": fp.get("asignatura", ""),
             })
