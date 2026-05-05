@@ -113,7 +113,12 @@ export default async function DashboardPage() {
     if (f.tipo) tipoMap[f.evento] = f.tipo
   }
 
-  const allFechas  = (fechasRes.data as FechaRow[] ?? [])
+  const allFechas = (fechasRes.data as FechaRow[] ?? [])
+    .filter(f => {
+      if (!f.titulo?.trim() || !f.fecha_evento) return false
+      const d = new Date(f.fecha_evento + 'T12:00:00')
+      return !isNaN(d.getTime())
+    })
   const semanaFechas = allFechas.filter(f => f.fecha_evento <= en7)
   const allNotas   = (notasRes.data as NotaRow[] ?? [])
 

@@ -97,6 +97,11 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
 
   const notas = (notasRes.data as NotaRow[] ?? [])
   const fechas = (fechasRes.data as FechaRow[] ?? [])
+    .filter(f => {
+      if (!f.titulo?.trim() || !f.fecha_evento) return false
+      const d = new Date(f.fecha_evento + 'T12:00:00')
+      return !isNaN(d.getTime())
+    })
   const anotaciones = (anotacionesRes.data as AnotacionRow[] ?? [])
   const horarioRaw = (horarioRes.data as HorarioRow[] ?? [])
 

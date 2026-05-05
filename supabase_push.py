@@ -189,13 +189,14 @@ def push_grades(data: dict) -> bool:
                 rows = []
                 for ag in agenda:
                     fecha = _parse_fecha(str(ag.get("fecha", "") or ""))
-                    if not fecha:
+                    titulo = (ag.get("descripcion") or ag.get("titulo") or "").strip()
+                    if not fecha or not titulo:
                         continue
                     rows.append({
                         "alumno": nombre,
                         "categoria": "fecha_proxima",
-                        "titulo": ag.get("descripcion", ""),
-                        "detalle": ag.get("descripcion", ""),
+                        "titulo": titulo,
+                        "detalle": titulo,
                         "fecha_evento": fecha,
                         "asignatura": ag.get("asignatura", ""),
                     })
