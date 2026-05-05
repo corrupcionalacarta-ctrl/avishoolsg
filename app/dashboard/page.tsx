@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import RefreshButton from './RefreshButton'
+import CalendarioFechas from './CalendarioFechas'
 
 const ALUMNOS = [
   { slug: 'clemente', nombre: 'Clemente', color: '#1d4ed8' },
@@ -301,85 +302,8 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* 5. PRÓXIMOS 7 DÍAS */}
-      {semanaFechas.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#b7c4ff' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Próximos 7 días</h2>
-          </div>
-          <div className="space-y-2">
-            {semanaFechas.map((f, i) => {
-              const date = new Date(f.fecha_evento + 'T12:00:00')
-              const day = date.getDate()
-              const month = date.toLocaleDateString('es-CL', { month: 'short' }).toUpperCase()
-              const dias = Math.ceil((date.getTime() - Date.now()) / 86400000)
-              const badge = dias <= 0 ? 'HOY' : dias === 1 ? 'MAÑANA' : `${dias}d`
-              const badgeColor = dias <= 0 ? '#ffb4ab' : dias <= 2 ? '#d2bbff' : '#6bd8cb'
-              const tipo = tipoMap[f.titulo]
-              // Busca detalle enriquecido desde Gemini json
-              const jsonFecha = fechasJson.find(j => j.evento === f.titulo)
-              // Construye detalle para expandir
-              const tieneDetalle = (f.detalle && f.detalle !== f.titulo) || jsonFecha
-
-              return tieneDetalle ? (
-                <details key={i} className="rounded-xl overflow-hidden group"
-                  style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
-                  <summary className="p-4 flex items-center gap-3 cursor-pointer list-none">
-                    <div className="text-center w-10 flex-shrink-0">
-                      <p className="text-[10px] font-semibold uppercase" style={{ color: '#6bd8cb' }}>{month}</p>
-                      <p className="text-[18px] font-bold leading-tight" style={{ color: '#e2e1ed' }}>{day}</p>
-                    </div>
-                    <div className="w-px h-8 flex-shrink-0" style={{ backgroundColor: '#434655' }} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-bold truncate" style={{ color: '#e2e1ed' }}>{f.titulo}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        {f.alumno && <StudentTag alumno={f.alumno} />}
-                        <TipoBadge tipo={tipo} />
-                        {f.asignatura && <span className="text-[11px]" style={{ color: '#8e90a0' }}>{f.asignatura}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                        style={{ color: badgeColor, border: `1px solid ${badgeColor}` }}>
-                        {badge}
-                      </span>
-                      <span className="material-symbols-outlined transition-transform group-open:rotate-180"
-                        style={{ color: '#8e90a0', fontSize: 18 }}>expand_more</span>
-                    </div>
-                  </summary>
-                  <div className="px-4 pb-4 pt-2 space-y-1" style={{ borderTop: '1px solid #43465540' }}>
-                    {f.detalle && f.detalle !== f.titulo && (
-                      <p className="text-[13px] leading-5" style={{ color: '#c4c5d7' }}>{f.detalle}</p>
-                    )}
-                  </div>
-                </details>
-              ) : (
-                <div key={i} className="rounded-xl p-4 flex items-center gap-3"
-                  style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
-                  <div className="text-center w-10 flex-shrink-0">
-                    <p className="text-[10px] font-semibold uppercase" style={{ color: '#6bd8cb' }}>{month}</p>
-                    <p className="text-[18px] font-bold leading-tight" style={{ color: '#e2e1ed' }}>{day}</p>
-                  </div>
-                  <div className="w-px h-8 flex-shrink-0" style={{ backgroundColor: '#434655' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-bold truncate" style={{ color: '#e2e1ed' }}>{f.titulo}</p>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      {f.alumno && <StudentTag alumno={f.alumno} />}
-                      <TipoBadge tipo={tipo} />
-                      {f.asignatura && <span className="text-[11px]" style={{ color: '#8e90a0' }}>{f.asignatura}</span>}
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
-                    style={{ color: badgeColor, border: `1px solid ${badgeColor}` }}>
-                    {badge}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
+      {/* 5. CALENDARIO DE FECHAS */}
+      <CalendarioFechas fechas={allFechas} titulo="Próximas Fechas" />
 
       {/* EMPTY STATE */}
       {!hayContenido && (
