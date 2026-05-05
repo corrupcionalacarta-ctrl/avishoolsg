@@ -17,20 +17,16 @@ export default function RefreshButton() {
     <button
       onClick={handleRefresh}
       disabled={loading}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold uppercase tracking-wider transition-colors"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors"
       style={{
-        backgroundColor: loading ? '#1a1b23' : '#1e1f27',
-        border: '1px solid #434655',
-        color: loading ? '#8e90a0' : '#b7c4ff',
+        backgroundColor: loading ? '#f1f5f9' : '#ffffff',
+        border: '1px solid #e2e8f0',
+        color: loading ? '#94a3b8' : '#1e3a8a',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
       }}
     >
-      <span
-        className="material-symbols-outlined"
-        style={{
-          fontSize: 16,
-          animation: loading ? 'spin 1s linear infinite' : 'none',
-        }}
-      >
+      <span className="material-symbols-outlined"
+        style={{ fontSize: 15, animation: loading ? 'spin 1s linear infinite' : 'none' }}>
         refresh
       </span>
       {loading ? 'Actualizando…' : 'Actualizar'}

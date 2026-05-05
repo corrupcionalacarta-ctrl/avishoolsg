@@ -14,13 +14,13 @@ export default function NavBar() {
 
   return (
     <nav className="fixed bottom-0 w-full z-50 flex justify-around items-center h-16"
-      style={{ backgroundColor: '#11131b', borderTop: '1px solid #434655' }}>
+      style={{ backgroundColor: '#ffffff', borderTop: '1px solid #e2e8f0', boxShadow: '0 -1px 3px rgba(0,0,0,0.06)' }}>
       {NAV.map(({ href, icon, label }) => {
         const active = path === href || (href !== '/dashboard' && path.startsWith(href))
         return (
           <Link key={href} href={href}
             className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors"
-            style={{ color: active ? '#b7c4ff' : '#434655' }}>
+            style={{ color: active ? '#1e3a8a' : '#94a3b8' }}>
             <span className="material-symbols-outlined"
               style={{
                 fontSize: 22,
@@ -28,8 +28,8 @@ export default function NavBar() {
               }}>
               {icon}
             </span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: active ? '#b7c4ff' : '#434655' }}>
+            <span className="text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: active ? '#1e3a8a' : '#94a3b8' }}>
               {label}
             </span>
           </Link>

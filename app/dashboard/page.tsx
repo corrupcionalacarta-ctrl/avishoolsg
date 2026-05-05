@@ -4,7 +4,7 @@ import RefreshButton from './RefreshButton'
 import CalendarioFechas from './CalendarioFechas'
 
 const ALUMNOS = [
-  { slug: 'clemente', nombre: 'Clemente', color: '#1d4ed8' },
+  { slug: 'clemente', nombre: 'Clemente', color: '#1e3a8a' },
   { slug: 'raimundo', nombre: 'Raimundo', color: '#7c3aed' },
 ]
 
@@ -31,10 +31,10 @@ type FechaJson = { fecha: string; evento: string; asignatura?: string; tipo?: st
 type AutorizItem = { titulo: string; fecha_limite?: string }
 
 function notaColor(nota: number | null) {
-  if (!nota) return '#8e90a0'
-  if (nota >= 6) return '#6bd8cb'
-  if (nota >= 5) return '#d2bbff'
-  return '#ffb4ab'
+  if (!nota) return '#94a3b8'
+  if (nota >= 6) return '#0d9488'
+  if (nota >= 5) return '#7c3aed'
+  return '#ef4444'
 }
 
 function StudentTag({ alumno }: { alumno: string | null }) {
@@ -42,7 +42,7 @@ function StudentTag({ alumno }: { alumno: string | null }) {
   const isRaimundo = name.toLowerCase().includes('raimundo')
   return (
     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white uppercase tracking-tight"
-      style={{ backgroundColor: isRaimundo ? '#7c3aed' : '#1d4ed8' }}>
+      style={{ backgroundColor: isRaimundo ? '#7c3aed' : '#1e3a8a' }}>
       {name.split(' ')[0]}
     </span>
   )
@@ -51,14 +51,14 @@ function StudentTag({ alumno }: { alumno: string | null }) {
 function TipoBadge({ tipo }: { tipo?: string }) {
   if (!tipo) return null
   const map: Record<string, { label: string; color: string }> = {
-    prueba:   { label: 'Prueba',   color: '#ffb4ab' },
-    control:  { label: 'Control',  color: '#ffb4ab' },
-    entrega:  { label: 'Entrega',  color: '#d2bbff' },
-    reunion:  { label: 'Reunión',  color: '#6bd8cb' },
-    evento:   { label: 'Evento',   color: '#b7c4ff' },
-    salida:   { label: 'Salida',   color: '#b7c4ff' },
+    prueba:   { label: 'Prueba',   color: '#ef4444' },
+    control:  { label: 'Control',  color: '#ef4444' },
+    entrega:  { label: 'Entrega',  color: '#7c3aed' },
+    reunion:  { label: 'Reunión',  color: '#0d9488' },
+    evento:   { label: 'Evento',   color: '#3b82f6' },
+    salida:   { label: 'Salida',   color: '#3b82f6' },
   }
-  const t = map[tipo.toLowerCase()] ?? { label: tipo, color: '#8e90a0' }
+  const t = map[tipo.toLowerCase()] ?? { label: tipo, color: '#94a3b8' }
   return (
     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
       style={{ backgroundColor: t.color + '22', color: t.color }}>
@@ -146,14 +146,14 @@ export default async function DashboardPage() {
 
       {/* HEADER */}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[12px] font-semibold uppercase tracking-widest shrink-0" style={{ color: '#8e90a0' }}>
+        <p className="text-[12px] font-semibold uppercase tracking-widest shrink-0" style={{ color: '#94a3b8' }}>
           {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
         <div className="flex items-center gap-1">
           {ALUMNOS.map(a => (
             <Link key={a.slug} href={`/dashboard/${a.slug}`}
               className="px-3 py-1 rounded-full text-[12px] font-bold"
-              style={{ backgroundColor: '#1e1f27', color: '#8e90a0', border: '1px solid #434655' }}>
+              style={{ backgroundColor: '#f8fafc', color: '#94a3b8', border: '1px solid #e2e8f0' }}>
               {a.nombre}
             </Link>
           ))}
@@ -163,35 +163,35 @@ export default async function DashboardPage() {
 
       {/* 1. ACTUALIZACIÓN DEL DÍA */}
       {(digest || utiles.length > 0) && (
-        <section className="rounded-xl overflow-hidden" style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
+        <section className="rounded-xl overflow-hidden" style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
           <div className="p-4 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ color: '#6bd8cb', fontSize: 18 }}>wb_sunny</span>
-              <h2 className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#6bd8cb' }}>
+              <span className="material-symbols-outlined" style={{ color: '#d97706', fontSize: 18 }}>wb_sunny</span>
+              <h2 className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#d97706' }}>
                 Hoy{digestHora ? ` · ${digestHora}` : ''}
               </h2>
             </div>
             {digest?.resumen_ejecutivo && (
-              <p className="text-[13px] leading-5" style={{ color: '#c4c5d7' }}>{digest.resumen_ejecutivo}</p>
+              <p className="text-[13px] leading-5" style={{ color: '#475569' }}>{digest.resumen_ejecutivo}</p>
             )}
           </div>
 
           {/* Colación especial */}
           {colacion && (
             <div className="px-4 pb-3 flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ color: '#d2bbff', fontSize: 16 }}>restaurant</span>
-              <span className="text-[12px]" style={{ color: '#d2bbff' }}><b>Colación:</b> {colacion}</span>
+              <span className="material-symbols-outlined" style={{ color: '#7c3aed', fontSize: 16 }}>restaurant</span>
+              <span className="text-[12px]" style={{ color: '#7c3aed' }}><b>Colación:</b> {colacion}</span>
             </div>
           )}
 
           {/* Útiles */}
           {utiles.length > 0 && (
-            <div className="px-4 pb-4 pt-1 space-y-1 border-t" style={{ borderColor: '#33343d' }}>
-              <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#8e90a0' }}>Llevar mañana</p>
+            <div className="px-4 pb-4 pt-1 space-y-1 border-t" style={{ borderColor: '#f8fafc' }}>
+              <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#94a3b8' }}>Llevar mañana</p>
               {utiles.map((u, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <span className="material-symbols-outlined" style={{ color: '#6bd8cb', fontSize: 16 }}>backpack</span>
-                  <span className="text-[13px]" style={{ color: '#e2e1ed' }}>{u}</span>
+                  <span className="material-symbols-outlined" style={{ color: '#0d9488', fontSize: 16 }}>backpack</span>
+                  <span className="text-[13px]" style={{ color: '#1e293b' }}>{u}</span>
                 </div>
               ))}
             </div>
@@ -203,17 +203,17 @@ export default async function DashboardPage() {
       {autorizaciones.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ffb4ab' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Firmar / Entregar</h2>
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Firmar / Entregar</h2>
           </div>
           {autorizaciones.map((a, i) => (
             <div key={i} className="rounded-xl p-4 flex items-start gap-3"
-              style={{ backgroundColor: '#1e1f27', border: '1px solid #93000a' }}>
-              <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ffb4ab', fontSize: 18 }}>edit_document</span>
+              style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ef4444', fontSize: 18 }}>edit_document</span>
               <div>
-                <p className="text-[13px] font-bold" style={{ color: '#e2e1ed' }}>{a.titulo}</p>
+                <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{a.titulo}</p>
                 {a.fecha_limite && (
-                  <p className="text-[11px] mt-0.5" style={{ color: '#ffb4ab' }}>Hasta: {a.fecha_limite}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: '#ef4444' }}>Hasta: {a.fecha_limite}</p>
                 )}
               </div>
             </div>
@@ -225,19 +225,19 @@ export default async function DashboardPage() {
       {anotNegHoy.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ffb4ab' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Anotaciones de Hoy</h2>
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Anotaciones de Hoy</h2>
           </div>
           {anotNegHoy.map((a, i) => (
             <div key={i} className="rounded-xl p-4 flex items-start gap-3"
-              style={{ backgroundColor: '#1e1f27', border: '1px solid #93000a' }}>
-              <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ffb4ab', fontSize: 18 }}>report</span>
+              style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ef4444', fontSize: 18 }}>report</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   <StudentTag alumno={a.alumno} />
-                  {a.titulo && <p className="text-[13px] font-bold truncate" style={{ color: '#e2e1ed' }}>{a.titulo}</p>}
+                  {a.titulo && <p className="text-[13px] font-bold truncate" style={{ color: '#1e293b' }}>{a.titulo}</p>}
                 </div>
-                {a.descripcion && <p className="text-[12px] leading-5" style={{ color: '#c4c5d7' }}>{a.descripcion}</p>}
+                {a.descripcion && <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{a.descripcion}</p>}
               </div>
             </div>
           ))}
@@ -248,25 +248,25 @@ export default async function DashboardPage() {
       {urgentes.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ffb4ab' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Requieren Acción</h2>
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Requieren Acción</h2>
           </div>
           {urgentes.map((u, i) => (
             <details key={i} className="rounded-xl overflow-hidden group"
-              style={{ backgroundColor: '#1e1f27', border: '1px solid #93000a' }}>
+              style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
               <summary className="p-4 flex items-start gap-3 cursor-pointer list-none">
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ffb4ab', fontSize: 18 }}>warning</span>
+                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ef4444', fontSize: 18 }}>warning</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-bold" style={{ color: '#e2e1ed' }}>{u.titulo}</p>
+                  <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{u.titulo}</p>
                   {u.dia && (
-                    <p className="text-[11px] mt-0.5 uppercase font-semibold" style={{ color: '#ffb4ab' }}>{u.dia}</p>
+                    <p className="text-[11px] mt-0.5 uppercase font-semibold" style={{ color: '#ef4444' }}>{u.dia}</p>
                   )}
                 </div>
                 <span className="material-symbols-outlined flex-shrink-0 mt-0.5 transition-transform group-open:rotate-180"
-                  style={{ color: '#8e90a0', fontSize: 18 }}>expand_more</span>
+                  style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
               </summary>
-              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #93000a33' }}>
-                <p className="text-[13px] leading-5" style={{ color: '#c4c5d7' }}>{u.detalle}</p>
+              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #fca5a544' }}>
+                <p className="text-[13px] leading-5" style={{ color: '#475569' }}>{u.detalle}</p>
               </div>
             </details>
           ))}
@@ -277,25 +277,25 @@ export default async function DashboardPage() {
       {importantes.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#d2bbff' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Importante esta semana</h2>
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#7c3aed' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Importante esta semana</h2>
           </div>
           {importantes.map((u, i) => (
             <details key={i} className="rounded-xl overflow-hidden group"
-              style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
+              style={{ backgroundColor: '#faf5ff', border: '1px solid #e9d5ff', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
               <summary className="p-4 flex items-start gap-3 cursor-pointer list-none">
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#d2bbff', fontSize: 18 }}>info</span>
+                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#7c3aed', fontSize: 18 }}>info</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-bold" style={{ color: '#e2e1ed' }}>{u.titulo}</p>
+                  <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{u.titulo}</p>
                   {u.dias_restantes !== undefined && u.dias_restantes > 0 && (
-                    <p className="text-[11px] mt-0.5" style={{ color: '#8e90a0' }}>en {u.dias_restantes} día{u.dias_restantes !== 1 ? 's' : ''}</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: '#94a3b8' }}>en {u.dias_restantes} día{u.dias_restantes !== 1 ? 's' : ''}</p>
                   )}
                 </div>
                 <span className="material-symbols-outlined flex-shrink-0 mt-0.5 transition-transform group-open:rotate-180"
-                  style={{ color: '#8e90a0', fontSize: 18 }}>expand_more</span>
+                  style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
               </summary>
-              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #43465540' }}>
-                <p className="text-[13px] leading-5" style={{ color: '#c4c5d7' }}>{u.detalle}</p>
+              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #e2e8f080' }}>
+                <p className="text-[13px] leading-5" style={{ color: '#475569' }}>{u.detalle}</p>
               </div>
             </details>
           ))}
@@ -308,10 +308,10 @@ export default async function DashboardPage() {
       {/* EMPTY STATE */}
       {!hayContenido && (
         <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
-          <span className="material-symbols-outlined" style={{ fontSize: 48, color: '#434655' }}>inbox</span>
+          <span className="material-symbols-outlined" style={{ fontSize: 48, color: '#cbd5e1' }}>inbox</span>
           <div>
-            <p className="font-semibold" style={{ color: '#8e90a0' }}>Sin datos aún</p>
-            <p className="text-[13px] mt-1" style={{ color: '#434655' }}>Corre el pipeline para poblar el dashboard</p>
+            <p className="font-semibold" style={{ color: '#94a3b8' }}>Sin datos aún</p>
+            <p className="text-[13px] mt-1" style={{ color: '#cbd5e1' }}>Corre el pipeline para poblar el dashboard</p>
           </div>
         </div>
       )}
