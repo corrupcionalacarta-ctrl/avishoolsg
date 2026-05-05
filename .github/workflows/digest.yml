@@ -1,0 +1,46 @@
+name: Digest + Análisis IA
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_analisis:
+        description: 'Incluir análisis IA de alumnos'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  run:
+    runs-on: self-hosted        # usa PC local (necesita gmail_token.json)
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python venv
+        shell: cmd
+        run: |
+          if not exist .venv (
+            python -m venv .venv
+            .venv\Scripts\pip install -r requirements.txt
+          )
+
+      - name: Gmail + Digest
+        shell: cmd
+        run: |
+          .venv\Scripts\python gmail_extractor.py --hours 24
+          .venv\Scripts\python digest.py --no-email
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      - name: Análisis IA alumnos
+        if: ${{ inputs.include_analisis == 'true' || inputs.include_analisis == true }}
+        shell: cmd
+        run: .venv\Scripts\python analizar.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

@@ -1,0 +1,46 @@
+name: SchoolNet + Morning Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Modo de ejecución'
+        required: false
+        default: 'grades'
+        type: choice
+        options:
+          - grades        # Solo notas/anotaciones SchoolNet
+          - morning       # Pipeline completo (gmail + schoolnet + digest)
+  schedule:
+    - cron: '30 9 * * 1-5'   # 6:30 AM Chile (UTC-3) lunes a viernes
+    - cron: '30 21 * * 1-5'  # 6:30 PM Chile (UTC-3) lunes a viernes
+
+jobs:
+  run:
+    runs-on: self-hosted        # ← corre en tu PC Windows
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python venv
+        shell: cmd
+        run: |
+          if not exist .venv (
+            python -m venv .venv
+            .venv\Scripts\pip install -r requirements.txt
+          )
+
+      - name: Ejecutar pipeline
+        shell: cmd
+        run: |
+          if "${{ github.event.inputs.mode }}" == "morning" (
+            .venv\Scripts\python run_all.py --morning
+          ) else (
+            .venv\Scripts\python schoolnet_direct.py
+          )
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

@@ -1,0 +1,44 @@
+name: Análisis IA alumnos
+
+on:
+  workflow_dispatch:
+    inputs:
+      alumno:
+        description: 'Alumno a analizar'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''            # ambos
+          - clemente
+          - raimundo
+
+jobs:
+  run:
+    runs-on: self-hosted
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python venv
+        shell: cmd
+        run: |
+          if not exist .venv (
+            python -m venv .venv
+            .venv\Scripts\pip install -r requirements.txt
+          )
+
+      - name: Ejecutar análisis
+        shell: cmd
+        run: |
+          if "${{ github.event.inputs.alumno }}" == "" (
+            .venv\Scripts\python analizar.py
+          ) else (
+            .venv\Scripts\python analizar.py --alumno ${{ github.event.inputs.alumno }}
+          )
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
