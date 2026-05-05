@@ -42,6 +42,8 @@ type AsistenciaRow = {
   asistencia_pct: number | null
   inasistencias: number | null
   horas_efectuadas: number | null
+  foto_b64: string | null
+  prof_jefe: string | null
 }
 
 const ALUMNOS: Record<string, { nombre: string; curso: string; color: string; initial: string }> = {
@@ -168,7 +170,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
       .order('bloque', { ascending: true }),
     supabase
       .from('asistencia')
-      .select('asistencia_pct, inasistencias, horas_efectuadas')
+      .select('asistencia_pct, inasistencias, horas_efectuadas, foto_b64, prof_jefe')
       .ilike('alumno', `%${primerNombre}%`)
       .maybeSingle(),
   ])
@@ -238,15 +240,30 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
       <section className="rounded-xl overflow-hidden"
         style={{ backgroundColor: alumno.color, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
         <div className="p-5 flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full flex items-center justify-center text-[24px] font-bold flex-shrink-0"
-            style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff' }}>
-            {alumno.initial}
-          </div>
+          {asistencia?.foto_b64 ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/foto_${slug}.jpg`}
+              alt={primerNombre}
+              className="w-14 h-14 rounded-full flex-shrink-0 object-cover"
+              style={{ border: '2px solid rgba(255,255,255,0.4)' }}
+            />
+          ) : (
+            <div className="w-14 h-14 rounded-full flex items-center justify-center text-[24px] font-bold flex-shrink-0"
+              style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: '#ffffff' }}>
+              {alumno.initial}
+            </div>
+          )}
           <div className="flex-1">
             <h1 className="text-[20px] font-bold text-white leading-tight">{alumno.nombre}</h1>
             <p className="text-[13px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>
               {alumno.curso} · Colegio Georgian
             </p>
+            {asistencia?.prof_jefe && (
+              <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                Prof. Jefe: {asistencia.prof_jefe.split(' ').slice(0, 2).join(' ')}
+              </p>
+            )}
           </div>
           {promedio && (
             <div className="text-center px-3 py-2 rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>

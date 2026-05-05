@@ -183,20 +183,40 @@ def push_grades(data: dict) -> bool:
                 sb.table("horario").insert(rows).execute()
                 print(f"[OK] {nombre}: {len(rows)} bloques de horario guardados")
 
-            # Asistencia (upsert en tabla asistencia si existe)
-            asistencia_pct = alumno.get("asistencia_pct")
-            if asistencia_pct is not None:
+            # Asistencia / Foto (upsert en tabla asistencia si existe)
+            foto_b64 = alumno.get("foto_b64")
+            prof_jefe = alumno.get("prof_jefe")
+            if foto_b64 or alumno.get("asistencia_pct") is not None:
                 try:
-                    sb.table("asistencia").upsert({
+                    row: dict = {
                         "alumno": nombre,
-                        "asistencia_pct": asistencia_pct,
-                        "inasistencias": alumno.get("inasistencias"),
-                        "horas_efectuadas": alumno.get("horas_efectuadas"),
                         "actualizado_en": datetime.now().isoformat(),
-                    }, on_conflict="alumno").execute()
-                    print(f"[OK] {nombre}: asistencia {asistencia_pct}% guardada")
+                    }
+                    if alumno.get("asistencia_pct") is not None:
+                        row["asistencia_pct"] = alumno["asistencia_pct"]
+                        row["inasistencias"] = alumno.get("inasistencias")
+                        row["horas_efectuadas"] = alumno.get("horas_efectuadas")
+                    if foto_b64:
+                        row["foto_b64"] = foto_b64
+                    if prof_jefe:
+                        row["prof_jefe"] = prof_jefe
+                    sb.table("asistencia").upsert(row, on_conflict="alumno").execute()
+                    print(f"[OK] {nombre}: asistencia/foto guardada")
                 except Exception as e:
                     print(f"[WARN] asistencia push: {e} (tabla puede no existir aún)")
+
+            # Guardar foto en public/ de Next.js (para uso directo en UI)
+            if foto_b64:
+                try:
+                    import base64
+                    slug = nombre.split()[0].lower()  # "clemente" o "raimundo"
+                    public_dir = Path(__file__).parent / "public"
+                    foto_path = public_dir / f"foto_{slug}.jpg"
+                    foto_bytes = base64.b64decode(foto_b64)
+                    foto_path.write_bytes(foto_bytes)
+                    print(f"[OK] Foto guardada en public/foto_{slug}.jpg ({len(foto_bytes)} bytes)")
+                except Exception as e:
+                    print(f"[WARN] foto save: {e}")
 
             # Agenda → items_colegio (borrar antes para evitar duplicados)
             agenda = alumno.get("agenda", [])

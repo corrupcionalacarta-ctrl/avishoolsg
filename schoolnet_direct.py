@@ -302,42 +302,34 @@ def parse_agenda_json(data, student_index: int) -> list[dict]:
     return result
 
 
-def parse_asistencia_json(data) -> dict:
-    """Extracts attendance percentage and counts from /asistencia JSON."""
-    if not data:
+def parse_asistencia_json(data, student_index: int = 0) -> dict:
+    """
+    Extracts student photo and teacher info from /asistencia JSON.
+    The endpoint returns: fotosAlumnos (base64 JPEGs), nombProfJefe, modasist, etc.
+    """
+    if not data or not isinstance(data, dict):
         return {}
-    if isinstance(data, dict):
-        # Look for common field names
-        for key in ["porcentaje", "pct", "asistencia_pct", "porcentajeAsistencia"]:
-            val = data.get(key)
-            if val is not None:
-                try:
-                    return {"asistencia_pct": float(str(val).replace(",", "."))}
-                except (ValueError, TypeError):
-                    pass
-        # Try to compute from horas_efectuadas / inasistencias
-        total = None
-        inasist = None
-        for k in ["totalHorasEfectuadas", "horas_efectuadas", "horasEfectuadas", "total"]:
-            v = data.get(k)
-            if v is not None:
-                try:
-                    total = float(v)
-                    break
-                except (ValueError, TypeError):
-                    pass
-        for k in ["totalInasistencias", "inasistencias", "horasInasistidas"]:
-            v = data.get(k)
-            if v is not None:
-                try:
-                    inasist = float(v)
-                    break
-                except (ValueError, TypeError):
-                    pass
-        if total and total > 0 and inasist is not None:
-            pct = round((total - inasist) / total * 100, 1)
-            return {"asistencia_pct": pct, "horas_efectuadas": int(total), "inasistencias": int(inasist)}
-    return {}
+
+    result = {}
+
+    # Extract student photo (base64 JPEG indexed by student position)
+    fotos = data.get("fotosAlumnos") or []
+    if isinstance(fotos, list) and student_index < len(fotos):
+        foto_b64 = fotos[student_index]
+        if foto_b64 and isinstance(foto_b64, str) and len(foto_b64) > 100:
+            result["foto_b64"] = foto_b64
+
+    # Teacher name
+    prof = data.get("nombProfJefe") or []
+    if isinstance(prof, list) and prof:
+        result["prof_jefe"] = prof[0]
+    elif isinstance(prof, str):
+        result["prof_jefe"] = prof
+
+    # modasist / modatras (attendance mode indicators — not percentages)
+    result["modasist"] = data.get("modasist")
+
+    return result
 
 
 def parse_horario_json(data: dict, student_index: int) -> list[dict]:
@@ -497,6 +489,8 @@ async def main():
                 "asistencia_pct": None,
                 "inasistencias": None,
                 "horas_efectuadas": None,
+                "foto_b64": None,
+                "prof_jefe": None,
                 "notas": [],
                 "anotaciones": [],
                 "agenda": [],
@@ -548,19 +542,18 @@ async def main():
             except Exception as e:
                 print(f"[WARN] Agenda: {e}")
 
-            # --- ASISTENCIA ---
+            # --- ASISTENCIA / FOTOS ---
             try:
-                print(f"[INFO] Asistencia...")
+                print(f"[INFO] Asistencia/Fotos...")
                 data = await api_fetch(page, "/asistencia")
                 if data:
-                    asist = parse_asistencia_json(data)
-                    if asist.get("asistencia_pct") is not None:
-                        alumno["asistencia_pct"] = asist["asistencia_pct"]
-                        alumno["inasistencias"] = asist.get("inasistencias")
-                        alumno["horas_efectuadas"] = asist.get("horas_efectuadas")
-                        print(f"[OK] Asistencia: {asist['asistencia_pct']}%")
-                    else:
-                        print("[WARN] Asistencia: sin porcentaje reconocible")
+                    asist = parse_asistencia_json(data, idx)
+                    if asist.get("foto_b64"):
+                        alumno["foto_b64"] = asist["foto_b64"]
+                        print(f"[OK] Foto extraída ({len(asist['foto_b64'])} chars b64)")
+                    if asist.get("prof_jefe"):
+                        alumno["prof_jefe"] = asist["prof_jefe"]
+                        print(f"[OK] Prof. Jefe: {asist['prof_jefe']}")
                 else:
                     print("[WARN] Asistencia: sin datos")
             except Exception as e:
