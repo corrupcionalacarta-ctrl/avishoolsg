@@ -12,6 +12,7 @@ Requiere en .env:
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import create_client
