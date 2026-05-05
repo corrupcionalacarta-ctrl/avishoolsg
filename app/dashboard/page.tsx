@@ -2,6 +2,11 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import RefreshButton from './RefreshButton'
 
+const ALUMNOS = [
+  { slug: 'clemente', nombre: 'Clemente', color: '#1d4ed8' },
+  { slug: 'raimundo', nombre: 'Raimundo', color: '#7c3aed' },
+]
+
 export const dynamic = 'force-dynamic'
 
 type NotaRow = {
@@ -95,10 +100,22 @@ export default async function DashboardPage() {
     <div className="space-y-5 mt-4">
 
       {/* HEADER */}
-      <div className="flex items-center justify-between">
-        <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: '#8e90a0' }}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px] font-semibold uppercase tracking-widest shrink-0" style={{ color: '#8e90a0' }}>
           {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
+        <div className="flex items-center gap-1">
+          {ALUMNOS.map(a => (
+            <Link
+              key={a.slug}
+              href={`/dashboard/${a.slug}`}
+              className="px-3 py-1 rounded-full text-[12px] font-bold"
+              style={{ backgroundColor: '#1e1f27', color: '#8e90a0', border: '1px solid #434655' }}
+            >
+              {a.nombre}
+            </Link>
+          ))}
+        </div>
         <RefreshButton />
       </div>
 
@@ -213,68 +230,6 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* 5. ALUMNOS */}
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#8e90a0' }} />
-          <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Alumnos</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {/* Clemente */}
-          <Link href="/dashboard/clemente" className="block rounded-xl p-4 space-y-3 hover:opacity-90 transition-opacity"
-            style={{ backgroundColor: '#1e1f27', border: '1px solid #1d4ed8' }}>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0"
-                style={{ backgroundColor: '#1d4ed8' }}>C</div>
-              <div>
-                <p className="text-[14px] font-bold leading-tight" style={{ color: '#e2e1ed' }}>Clemente</p>
-                <p className="text-[11px]" style={{ color: '#8e90a0' }}>6° D</p>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: '#8e90a0' }}>Prom.</p>
-                <p className="text-[22px] font-bold leading-tight"
-                  style={{ color: clementePromedio ? notaColor(parseFloat(clementePromedio)) : '#434655' }}>
-                  {clementePromedio ?? '–'}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: '#8e90a0' }}>Fechas</p>
-                <p className="text-[22px] font-bold leading-tight" style={{ color: '#6bd8cb' }}>{clementeFechas.length}</p>
-              </div>
-              <span className="material-symbols-outlined" style={{ color: '#434655', fontSize: 20 }}>chevron_right</span>
-            </div>
-          </Link>
-
-          {/* Raimundo */}
-          <Link href="/dashboard/raimundo" className="block rounded-xl p-4 space-y-3 hover:opacity-90 transition-opacity"
-            style={{ backgroundColor: '#1e1f27', border: '1px solid #7c3aed' }}>
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0"
-                style={{ backgroundColor: '#7c3aed' }}>R</div>
-              <div>
-                <p className="text-[14px] font-bold leading-tight" style={{ color: '#e2e1ed' }}>Raimundo</p>
-                <p className="text-[11px]" style={{ color: '#8e90a0' }}>4° A</p>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: '#8e90a0' }}>Prom.</p>
-                <p className="text-[22px] font-bold leading-tight"
-                  style={{ color: raimundoPromedio ? notaColor(parseFloat(raimundoPromedio)) : '#434655' }}>
-                  {raimundoPromedio ?? '–'}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: '#8e90a0' }}>Fechas</p>
-                <p className="text-[22px] font-bold leading-tight" style={{ color: '#6bd8cb' }}>{raimundoFechas.length}</p>
-              </div>
-              <span className="material-symbols-outlined" style={{ color: '#434655', fontSize: 20 }}>chevron_right</span>
-            </div>
-          </Link>
-        </div>
-      </section>
 
       {/* EMPTY STATE */}
       {!hayContenido && (

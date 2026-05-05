@@ -10,14 +10,12 @@ type NotaRow = {
   nota: number | null
   promedio_curso: number | null
   descripcion: string | null
-  extraido_en: string
 }
 
 type FechaRow = {
   titulo: string
   fecha_evento: string
   asignatura: string | null
-  categoria: string | null
 }
 
 type AnotacionRow = {
@@ -27,9 +25,9 @@ type AnotacionRow = {
   tipo: string | null
 }
 
-const ALUMNOS: Record<string, { nombre: string; apellido: string; curso: string; color: string; initial: string }> = {
-  clemente: { nombre: 'Clemente', apellido: 'Aravena', curso: '6° D', color: '#1d4ed8', initial: 'C' },
-  raimundo: { nombre: 'Raimundo', apellido: 'Aravena', curso: '4° A', color: '#7c3aed', initial: 'R' },
+const ALUMNOS: Record<string, { nombre: string; curso: string; color: string; initial: string }> = {
+  clemente: { nombre: 'Clemente Aravena', curso: '6° D', color: '#1d4ed8', initial: 'C' },
+  raimundo: { nombre: 'Raimundo Aravena', curso: '4° A', color: '#7c3aed', initial: 'R' },
 }
 
 function notaColor(nota: number | null) {
@@ -39,34 +37,36 @@ function notaColor(nota: number | null) {
   return '#ffb4ab'
 }
 
-export default async function AlumnoPage({ params }: { params: { alumno: string } }) {
-  const slug = params.alumno.toLowerCase()
+export default async function AlumnoPage({ params }: { params: Promise<{ alumno: string }> }) {
+  const { alumno: slugRaw } = await params
+  const slug = slugRaw.toLowerCase()
   const alumno = ALUMNOS[slug]
   if (!alumno) notFound()
 
   const hoy = new Date().toISOString().split('T')[0]
-  const nombreFiltro = alumno.nombre
+  const primerNombre = alumno.nombre.split(' ')[0]
 
   const [notasRes, fechasRes, anotacionesRes] = await Promise.all([
     supabase
       .from('notas')
-      .select('asignatura, tipo, nota, promedio_curso, descripcion, extraido_en')
-      .ilike('alumno', `%${nombreFiltro}%`)
+      .select('asignatura, tipo, nota, promedio_curso, descripcion')
+      .ilike('alumno', `%${primerNombre}%`)
       .order('extraido_en', { ascending: false })
       .limit(30),
     supabase
       .from('items_colegio')
-      .select('titulo, fecha_evento, asignatura, categoria')
-      .or(`alumno.ilike.%${nombreFiltro}%,alumno.ilike.%ambos%,alumno.is.null`)
+      .select('titulo, fecha_evento, asignatura')
+      .ilike('alumno', `%${primerNombre}%`)
+      .eq('categoria', 'fecha_proxima')
       .gte('fecha_evento', hoy)
       .order('fecha_evento')
       .limit(20),
     supabase
       .from('anotaciones')
       .select('titulo, descripcion, fecha, tipo')
-      .ilike('alumno', `%${nombreFiltro}%`)
+      .ilike('alumno', `%${primerNombre}%`)
       .order('fecha', { ascending: false })
-      .limit(10),
+      .limit(15),
   ])
 
   const notas = (notasRes.data as NotaRow[] ?? [])
@@ -77,29 +77,42 @@ export default async function AlumnoPage({ params }: { params: { alumno: string 
     ? (notas.filter(n => n.nota).reduce((a, n) => a + (n.nota ?? 0), 0) / notas.filter(n => n.nota).length).toFixed(1)
     : null
 
-  // Agrupamos notas por asignatura (última por asignatura)
   const notasPorAsignatura: Record<string, NotaRow[]> = {}
   for (const n of notas) {
     if (!notasPorAsignatura[n.asignatura]) notasPorAsignatura[n.asignatura] = []
     notasPorAsignatura[n.asignatura].push(n)
   }
 
-  const anotacionesNegativas = anotaciones.filter(a => a.tipo?.toLowerCase().includes('negat') || a.tipo?.toLowerCase().includes('mala'))
-  const anotacionesPositivas = anotaciones.filter(a => !anotacionesNegativas.includes(a))
-
   return (
     <div className="space-y-5 mt-4">
 
-      {/* HEADER */}
-      <div className="flex items-center gap-3">
-        <Link href="/dashboard" className="flex items-center gap-1 text-[12px] font-semibold"
-          style={{ color: '#8e90a0' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_back</span>
-          Dashboard
-        </Link>
+      {/* HEADER con tabs de alumnos */}
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: '#8e90a0' }}>
+          {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
+        <div className="flex items-center gap-1">
+          {Object.entries(ALUMNOS).map(([key, a]) => {
+            const activo = key === slug
+            return (
+              <Link
+                key={key}
+                href={`/dashboard/${key}`}
+                className="px-3 py-1 rounded-full text-[12px] font-bold transition-all"
+                style={{
+                  backgroundColor: activo ? a.color : '#1e1f27',
+                  color: activo ? '#ffffff' : '#8e90a0',
+                  border: `1px solid ${activo ? a.color : '#434655'}`,
+                }}
+              >
+                {a.nombre.split(' ')[0]}
+              </Link>
+            )
+          })}
+        </div>
       </div>
 
-      {/* PERFIL ALUMNO */}
+      {/* PERFIL */}
       <section className="rounded-xl p-5 flex items-center gap-4"
         style={{ backgroundColor: '#1e1f27', border: `1px solid ${alumno.color}` }}>
         <div className="w-14 h-14 rounded-full flex items-center justify-center text-[24px] font-bold text-white flex-shrink-0"
@@ -107,9 +120,7 @@ export default async function AlumnoPage({ params }: { params: { alumno: string 
           {alumno.initial}
         </div>
         <div className="flex-1">
-          <h1 className="text-[20px] font-bold" style={{ color: '#e2e1ed' }}>
-            {alumno.nombre} {alumno.apellido}
-          </h1>
+          <h1 className="text-[20px] font-bold" style={{ color: '#e2e1ed' }}>{alumno.nombre}</h1>
           <p className="text-[13px]" style={{ color: '#8e90a0' }}>{alumno.curso} — Colegio Georgian</p>
         </div>
         {promedio && (
@@ -170,35 +181,33 @@ export default async function AlumnoPage({ params }: { params: { alumno: string 
             <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Notas</h2>
           </div>
           <div className="space-y-2">
-            {Object.entries(notasPorAsignatura).map(([asig, notas]) => {
-              const ultima = notas[0]
-              const promedioAsig = notas.filter(n => n.nota).length > 0
-                ? (notas.filter(n => n.nota).reduce((a, n) => a + (n.nota ?? 0), 0) / notas.filter(n => n.nota).length).toFixed(1)
-                : null
+            {Object.entries(notasPorAsignatura).map(([asig, notasAsig]) => {
               return (
                 <div key={asig} className="rounded-xl p-4"
                   style={{ backgroundColor: '#1e1f27', border: '1px solid #434655' }}>
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-3">
                     <p className="text-[13px] font-bold" style={{ color: '#e2e1ed' }}>{asig}</p>
-                    {notas.length > 1 && (
-                      <p className="text-[11px]" style={{ color: '#8e90a0' }}>{notas.length} notas</p>
+                    {notasAsig.length > 1 && (
+                      <p className="text-[11px]" style={{ color: '#8e90a0' }}>{notasAsig.length} notas</p>
                     )}
                   </div>
-                  <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-                    {notas.map((n, i) => (
-                      <div key={i} className="flex-shrink-0 text-center">
-                        <p className="text-[22px] font-bold leading-tight" style={{ color: notaColor(n.nota) }}>
+                  <div className="flex gap-4 overflow-x-auto hide-scrollbar">
+                    {notasAsig.map((n, i) => (
+                      <div key={i} className="flex-shrink-0 text-center min-w-[48px]">
+                        <p className="text-[24px] font-bold leading-tight" style={{ color: notaColor(n.nota) }}>
                           {n.nota ?? '–'}
                         </p>
                         {n.descripcion && (
-                          <p className="text-[10px] max-w-[64px] truncate" style={{ color: '#8e90a0' }}>{n.descripcion}</p>
+                          <p className="text-[10px] mt-0.5 max-w-[56px] truncate" style={{ color: '#8e90a0' }}>
+                            {n.descripcion}
+                          </p>
                         )}
                       </div>
                     ))}
                   </div>
-                  {ultima.promedio_curso && (
-                    <p className="text-[11px] mt-2" style={{ color: '#434655' }}>
-                      Promedio del curso: {ultima.promedio_curso}
+                  {notasAsig[0]?.promedio_curso && (
+                    <p className="text-[11px] mt-3 pt-2" style={{ color: '#434655', borderTop: '1px solid #33343d' }}>
+                      Promedio del curso: {notasAsig[0].promedio_curso}
                     </p>
                   )}
                 </div>
@@ -212,13 +221,15 @@ export default async function AlumnoPage({ params }: { params: { alumno: string 
       {anotaciones.length > 0 && (
         <section className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full"
-              style={{ backgroundColor: anotacionesNegativas.length > 0 ? '#ffb4ab' : '#6bd8cb' }} />
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#6bd8cb' }} />
             <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Conducta</h2>
+            <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#33343d', color: '#8e90a0' }}>
+              {anotaciones.length}
+            </span>
           </div>
           <div className="space-y-2">
             {anotaciones.map((a, i) => {
-              const negativa = anotacionesNegativas.includes(a)
+              const negativa = a.tipo?.toLowerCase().includes('negat') || a.tipo?.toLowerCase().includes('mala')
               return (
                 <div key={i} className="rounded-xl p-4"
                   style={{ backgroundColor: '#1e1f27', border: `1px solid ${negativa ? '#93000a' : '#434655'}` }}>
@@ -244,7 +255,8 @@ export default async function AlumnoPage({ params }: { params: { alumno: string 
       {notas.length === 0 && fechas.length === 0 && anotaciones.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
           <span className="material-symbols-outlined" style={{ fontSize: 48, color: '#434655' }}>school</span>
-          <p className="font-semibold" style={{ color: '#8e90a0' }}>Sin datos para {alumno.nombre}</p>
+          <p className="font-semibold" style={{ color: '#8e90a0' }}>Sin datos para {primerNombre}</p>
+          <p className="text-[13px]" style={{ color: '#434655' }}>Corre el pipeline de SchoolNet para sincronizar</p>
         </div>
       )}
 
