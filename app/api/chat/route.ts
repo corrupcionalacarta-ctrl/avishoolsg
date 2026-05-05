@@ -45,10 +45,12 @@ INSTRUCCIONES:
   const result = await chat.sendMessage(pregunta)
   const respuesta = result.response.text()
 
-  await supabase.from('mensajes_chat').insert([
-    { canal: 'web', rol: 'user', contenido: pregunta, alumno: alumno ?? null },
-    { canal: 'web', rol: 'assistant', contenido: respuesta, alumno: alumno ?? null },
-  ]).then(() => {}).catch(() => {})
+  try {
+    await supabase.from('mensajes_chat').insert([
+      { canal: 'web', rol: 'user', contenido: pregunta, alumno: alumno ?? null },
+      { canal: 'web', rol: 'assistant', contenido: respuesta, alumno: alumno ?? null },
+    ])
+  } catch {}
 
   return Response.json({ respuesta })
 }
