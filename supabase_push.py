@@ -144,6 +144,44 @@ def push_grades(data: dict) -> bool:
                 sb.table("anotaciones").insert(rows).execute()
                 print(f"[OK] {nombre}: {len(rows)} anotaciones guardadas")
 
+            # Horario (borrar y reinsertar siempre)
+            horario = alumno.get("horario", [])
+            sb.table("horario").delete().eq("alumno", nombre).execute()
+            if horario:
+                rows = []
+                for h in horario:
+                    hora_str = h.get("hora", "")
+                    bloque = None
+                    hora_inicio = None
+                    hora_fin = None
+                    tipo_h = "clase"
+                    parts = hora_str.split("|")
+                    if len(parts) == 2:
+                        bloque_part = parts[0].strip()
+                        tiempo_part = parts[1].strip()
+                        t_match = re.match(r'(\d{2}:\d{2})-(\d{2}:\d{2})', tiempo_part)
+                        if t_match:
+                            hora_inicio, hora_fin = t_match.group(1), t_match.group(2)
+                        b_match = re.match(r'Bloque\s+(\d+)', bloque_part, re.IGNORECASE)
+                        if b_match:
+                            bloque = int(b_match.group(1))
+                        elif "recreo" in bloque_part.lower():
+                            tipo_h = "recreo"
+                        elif "almuerzo" in bloque_part.lower():
+                            tipo_h = "almuerzo"
+                    rows.append({
+                        "alumno": nombre,
+                        "dia": h.get("dia", ""),
+                        "bloque": bloque,
+                        "hora_inicio": hora_inicio,
+                        "hora_fin": hora_fin,
+                        "asignatura": h.get("asignatura", ""),
+                        "sala": h.get("sala", ""),
+                        "tipo": tipo_h,
+                    })
+                sb.table("horario").insert(rows).execute()
+                print(f"[OK] {nombre}: {len(rows)} bloques de horario guardados")
+
             # Agenda → items_colegio (borrar antes para evitar duplicados)
             agenda = alumno.get("agenda", [])
             sb.table("items_colegio").delete().eq("alumno", nombre).eq("categoria", "fecha_proxima").execute()

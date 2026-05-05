@@ -70,7 +70,7 @@ export default async function DashboardPage() {
   const hoy = new Date().toISOString().split('T')[0]
   const en7 = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]
 
-  const [digestRes, fechasRes, notasRes] = await Promise.all([
+  const [digestRes, fechasRes, notasRes, anotNegRes] = await Promise.all([
     supabase
       .from('digests')
       .select('resumen_ejecutivo, created_at, json_completo')
@@ -89,8 +89,15 @@ export default async function DashboardPage() {
       .select('alumno, asignatura, nota, promedio_curso')
       .order('extraido_en', { ascending: false })
       .limit(20),
+    supabase
+      .from('anotaciones')
+      .select('alumno, descripcion, titulo, fecha')
+      .eq('tipo', 'negativa')
+      .gte('fecha', hoy)
+      .order('fecha', { ascending: false }),
   ])
 
+  const anotNegHoy = (anotNegRes.data ?? []) as { alumno: string | null; descripcion: string | null; titulo: string | null; fecha: string | null }[]
   const digest = digestRes.data
   const json = (digest?.json_completo ?? {}) as Record<string, unknown>
   const urgentes      = (json.urgentes               as UrgItem[]      ?? [])
@@ -126,7 +133,7 @@ export default async function DashboardPage() {
     ? new Date(digest.created_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
     : null
 
-  const hayContenido = urgentes.length > 0 || utiles.length > 0 || importantes.length > 0 || allFechas.length > 0 || allNotas.length > 0
+  const hayContenido = urgentes.length > 0 || utiles.length > 0 || importantes.length > 0 || allFechas.length > 0 || allNotas.length > 0 || anotNegHoy.length > 0
 
   return (
     <div className="space-y-5 mt-4">
@@ -202,6 +209,29 @@ export default async function DashboardPage() {
                 {a.fecha_limite && (
                   <p className="text-[11px] mt-0.5" style={{ color: '#ffb4ab' }}>Hasta: {a.fecha_limite}</p>
                 )}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* ANOTACIONES NEGATIVAS HOY */}
+      {anotNegHoy.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ffb4ab' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#e2e1ed' }}>Anotaciones de Hoy</h2>
+          </div>
+          {anotNegHoy.map((a, i) => (
+            <div key={i} className="rounded-xl p-4 flex items-start gap-3"
+              style={{ backgroundColor: '#1e1f27', border: '1px solid #93000a' }}>
+              <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ffb4ab', fontSize: 18 }}>report</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <StudentTag alumno={a.alumno} />
+                  {a.titulo && <p className="text-[13px] font-bold truncate" style={{ color: '#e2e1ed' }}>{a.titulo}</p>}
+                </div>
+                {a.descripcion && <p className="text-[12px] leading-5" style={{ color: '#c4c5d7' }}>{a.descripcion}</p>}
               </div>
             </div>
           ))}
