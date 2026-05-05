@@ -144,8 +144,9 @@ def push_grades(data: dict) -> bool:
                 sb.table("anotaciones").insert(rows).execute()
                 print(f"[OK] {nombre}: {len(rows)} anotaciones guardadas")
 
-            # Agenda → items_colegio
+            # Agenda → items_colegio (borrar antes para evitar duplicados)
             agenda = alumno.get("agenda", [])
+            sb.table("items_colegio").delete().eq("alumno", nombre).eq("categoria", "fecha_proxima").execute()
             if agenda:
                 rows = []
                 for ag in agenda:
