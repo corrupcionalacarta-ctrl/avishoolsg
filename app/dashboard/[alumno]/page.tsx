@@ -46,6 +46,18 @@ type AsistenciaRow = {
   prof_jefe: string | null
 }
 
+type AnalisisRow = {
+  resumen: string | null
+  tendencia_academica: string | null
+  tendencia_conducta: string | null
+  nivel_alerta: string | null
+  analisis_academico: string | null
+  analisis_conducta: string | null
+  prediccion: string | null
+  json_completo: Record<string, unknown> | null
+  generado_en: string | null
+}
+
 const ALUMNOS: Record<string, { nombre: string; curso: string; color: string; initial: string }> = {
   clemente: { nombre: 'Clemente Aravena', curso: '6° D', color: '#1e3a8a', initial: 'C' },
   raimundo: { nombre: 'Raimundo Aravena', curso: '4° A', color: '#7c3aed', initial: 'R' },
@@ -142,7 +154,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
   const primerNombre = alumno.nombre.split(' ')[0]
   const diaActual = diaHoy()
 
-  const [notasRes, fechasRes, anotacionesRes, horarioRes, asistenciaRes] = await Promise.all([
+  const [notasRes, fechasRes, anotacionesRes, horarioRes, asistenciaRes, analisisRes] = await Promise.all([
     supabase
       .from('notas')
       .select('asignatura, tipo, nota, promedio_curso, descripcion')
@@ -173,6 +185,13 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
       .select('asistencia_pct, inasistencias, horas_efectuadas, foto_b64, prof_jefe')
       .ilike('alumno', `%${primerNombre}%`)
       .maybeSingle(),
+    supabase
+      .from('analisis_alumno')
+      .select('resumen, tendencia_academica, tendencia_conducta, nivel_alerta, analisis_academico, analisis_conducta, prediccion, json_completo, generado_en')
+      .ilike('alumno', `%${primerNombre}%`)
+      .order('generado_en', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const notas = (notasRes.data as NotaRow[] ?? [])
@@ -185,6 +204,7 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
   const anotaciones = (anotacionesRes.data as AnotacionRow[] ?? [])
   const horarioRaw = (horarioRes.data as HorarioRow[] ?? [])
   const asistencia = (asistenciaRes.data as AsistenciaRow | null)
+  const analisis = (analisisRes.data as AnalisisRow | null)
 
   const negativas = anotaciones.filter(a => a.tipo === 'negativa')
   const positivas = anotaciones.filter(a => a.tipo === 'positiva')
@@ -295,6 +315,163 @@ export default async function AlumnoPage({ params }: { params: Promise<{ alumno:
           </div>
         )}
       </section>
+
+      {/* ANÁLISIS IA */}
+      {analisis ? (
+        <section className="space-y-3">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: alumno.color }} />
+              <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Análisis IA</h2>
+            </div>
+            {analisis.generado_en && (
+              <span className="text-[10px]" style={{ color: '#94a3b8' }}>
+                {new Date(analisis.generado_en).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+              </span>
+            )}
+          </div>
+
+          {/* Tendencias */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Académico', val: analisis.tendencia_academica },
+              { label: 'Conducta', val: analisis.tendencia_conducta },
+              { label: 'Alerta', val: analisis.nivel_alerta },
+            ].map(({ label, val }) => {
+              const icon = val === 'mejorando' ? '↑' : val === 'descendiendo' ? '↓' : val === 'alto' ? '!' : '→'
+              const color = val === 'mejorando' || val === 'bajo' ? '#0d9488'
+                : val === 'descendiendo' || val === 'alto' ? '#ef4444' : '#d97706'
+              const bg = val === 'mejorando' || val === 'bajo' ? '#f0fdfa'
+                : val === 'descendiendo' || val === 'alto' ? '#fef2f2' : '#fffbeb'
+              return (
+                <div key={label} className="rounded-xl p-3 text-center"
+                  style={{ backgroundColor: bg, border: `1px solid ${color}22` }}>
+                  <p className="text-[20px] font-bold" style={{ color }}>{icon}</p>
+                  <p className="text-[11px] font-bold" style={{ color }}>{val ?? '–'}</p>
+                  <p className="text-[9px] uppercase tracking-wider mt-0.5" style={{ color: '#94a3b8' }}>{label}</p>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Resumen */}
+          {analisis.resumen && (
+            <div className="rounded-xl p-4"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <p className="text-[13px] leading-5" style={{ color: '#1e293b' }}>{analisis.resumen}</p>
+            </div>
+          )}
+
+          {/* Alertas */}
+          {(() => {
+            const alertas = (analisis.json_completo?.alertas as {titulo:string;descripcion:string;prioridad:string}[] | null) ?? []
+            if (!alertas.length) return null
+            return (
+              <div className="space-y-1.5">
+                {alertas.map((a, i) => {
+                  const color = a.prioridad === 'alta' ? '#ef4444' : a.prioridad === 'media' ? '#d97706' : '#0d9488'
+                  const bg = a.prioridad === 'alta' ? '#fef2f2' : a.prioridad === 'media' ? '#fffbeb' : '#f0fdfa'
+                  return (
+                    <div key={i} className="rounded-lg p-3 flex gap-2"
+                      style={{ backgroundColor: bg, border: `1px solid ${color}30` }}>
+                      <span className="material-symbols-outlined flex-shrink-0 mt-0.5"
+                        style={{ color, fontSize: 14 }}>warning</span>
+                      <div>
+                        <p className="text-[12px] font-bold" style={{ color: '#1e293b' }}>{a.titulo}</p>
+                        <p className="text-[11px] mt-0.5" style={{ color: '#475569' }}>{a.descripcion}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Detalles colapsables */}
+          <details className="rounded-xl overflow-hidden"
+            style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <summary className="px-4 py-3 cursor-pointer list-none flex items-center justify-between">
+              <span className="text-[13px] font-semibold" style={{ color: '#475569' }}>
+                Ver análisis completo y recomendaciones
+              </span>
+              <span className="material-symbols-outlined" style={{ color: '#94a3b8', fontSize: 16 }}>expand_more</span>
+            </summary>
+            <div className="px-4 pb-4 space-y-4" style={{ borderTop: '1px solid #f1f5f9' }}>
+              {analisis.analisis_academico && (
+                <div className="pt-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: '#7c3aed' }}>Académico</p>
+                  <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{analisis.analisis_academico}</p>
+                </div>
+              )}
+              {analisis.analisis_conducta && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: '#0d9488' }}>Conducta</p>
+                  <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{analisis.analisis_conducta}</p>
+                </div>
+              )}
+              {(() => {
+                const recs = (analisis.json_completo?.recomendaciones as {accion:string;razon:string;urgencia:string}[] | null) ?? []
+                if (!recs.length) return null
+                return (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: '#1e3a8a' }}>Recomendaciones</p>
+                    <div className="space-y-2">
+                      {recs.map((r, i) => (
+                        <div key={i} className="flex gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 h-fit mt-0.5"
+                            style={{
+                              backgroundColor: r.urgencia === 'inmediata' ? '#fef2f2' : r.urgencia === 'esta_semana' ? '#fffbeb' : '#f0f9ff',
+                              color: r.urgencia === 'inmediata' ? '#ef4444' : r.urgencia === 'esta_semana' ? '#d97706' : '#1e3a8a',
+                            }}>
+                            {r.urgencia?.replace('_', ' ')}
+                          </span>
+                          <div>
+                            <p className="text-[12px] font-semibold" style={{ color: '#1e293b' }}>{r.accion}</p>
+                            <p className="text-[11px] mt-0.5" style={{ color: '#94a3b8' }}>{r.razon}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+              {analisis.prediccion && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: '#d97706' }}>Predicción próximas 4 semanas</p>
+                  <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{analisis.prediccion}</p>
+                </div>
+              )}
+              {(() => {
+                const msg = analisis.json_completo?.mensaje_motivacional as string | null
+                if (!msg) return null
+                return (
+                  <div className="rounded-lg p-3" style={{ backgroundColor: alumno.color + '10', border: `1px solid ${alumno.color}20` }}>
+                    <p className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: alumno.color }}>Para {primerNombre}</p>
+                    <p className="text-[13px] italic" style={{ color: '#1e293b' }}>"{msg}"</p>
+                  </div>
+                )
+              })()}
+            </div>
+          </details>
+
+          {/* Botón chat con contexto del alumno */}
+          <Link href={`/chat?alumno=${slug}`}
+            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl font-semibold text-[13px]"
+            style={{ backgroundColor: alumno.color + '12', color: alumno.color, border: `1px solid ${alumno.color}25` }}>
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>chat</span>
+            Preguntar sobre {primerNombre}
+          </Link>
+        </section>
+      ) : (
+        <div className="rounded-xl p-4 text-center"
+          style={{ backgroundColor: '#f8fafc', border: '1px dashed #e2e8f0' }}>
+          <p className="text-[12px]" style={{ color: '#94a3b8' }}>Sin análisis IA aún</p>
+          <p className="text-[11px] mt-1" style={{ color: '#cbd5e1' }}>
+            Corre <code className="bg-slate-100 px-1 rounded">python analizar.py</code> para generar
+          </p>
+        </div>
+      )}
 
       {/* ANOTACIONES NEGATIVAS */}
       {negativas.length > 0 && (

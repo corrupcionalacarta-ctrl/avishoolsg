@@ -1,15 +1,20 @@
 import { supabase } from './supabase'
 
-export async function buildContext(): Promise<string> {
+export async function buildContext(alumnoFiltro?: string): Promise<string> {
   const hoy = new Date().toISOString().split('T')[0]
   const en14 = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().split('T')[0]
+  const hace30 = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0]
 
-  const [digestRes, fechasRes, notasRes] = await Promise.all([
+  const primerNombre = alumnoFiltro
+    ? alumnoFiltro.charAt(0).toUpperCase() + alumnoFiltro.slice(1)
+    : null
+
+  const [digestRes, fechasRes, notasRes, anotacionesRes, analisisRes] = await Promise.all([
     supabase
       .from('digests')
-      .select('resumen_ejecutivo, json_completo, created_at, alumno')
+      .select('resumen_ejecutivo, json_completo, created_at')
       .order('created_at', { ascending: false })
-      .limit(3),
+      .limit(5),
 
     supabase
       .from('items_colegio')
@@ -21,22 +26,61 @@ export async function buildContext(): Promise<string> {
 
     supabase
       .from('notas')
-      .select('asignatura, tipo, nota, promedio_curso, descripcion, alumno')
+      .select('asignatura, tipo, nota, promedio_curso, descripcion, alumno, extraido_en')
       .order('extraido_en', { ascending: false })
+      .limit(60),
+
+    supabase
+      .from('anotaciones')
+      .select('fecha, tipo, titulo, descripcion, asignatura, alumno')
+      .gte('fecha', hace30)
+      .order('fecha', { ascending: false })
       .limit(30),
+
+    // Último análisis IA por alumno
+    supabase
+      .from('analisis_alumno')
+      .select('alumno, resumen, tendencia_academica, tendencia_conducta, nivel_alerta, prediccion, alertas, recomendaciones, generado_en')
+      .order('generado_en', { ascending: false })
+      .limit(4),
   ])
 
   const lines: string[] = ['=== CONTEXTO ESCOLAR AVI SCHOOL ===']
-  lines.push(`Fecha: ${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}`)
-  lines.push('Alumnos: Clemente Aravena (6°D) y Raimundo Aravena (4°A) — Colegio Georgian\n')
+  lines.push(`Fecha: ${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`)
+  lines.push('Alumnos: Clemente Aravena (11 años, 6°D) y Raimundo Aravena (9 años, 4°A) — Colegio Georgian (Saint George)\n')
 
+  // Análisis IA de cada alumno
+  if (analisisRes.data?.length) {
+    lines.push('━━━ ANÁLISIS IA DEL ALUMNO ━━━')
+    const byAlumno: Record<string, typeof analisisRes.data[0]> = {}
+    for (const a of analisisRes.data) {
+      const nombre = a.alumno?.split(' ')[0] ?? 'Alumno'
+      if (!byAlumno[nombre]) byAlumno[nombre] = a
+    }
+    for (const [nombre, a] of Object.entries(byAlumno)) {
+      if (primerNombre && !nombre.toLowerCase().includes(primerNombre.toLowerCase())) continue
+      const fecha = a.generado_en ? new Date(a.generado_en).toLocaleDateString('es-CL') : ''
+      lines.push(`\n${nombre} (análisis del ${fecha}):`)
+      lines.push(`  Tendencia académica: ${a.tendencia_academica ?? '?'} | Conducta: ${a.tendencia_conducta ?? '?'} | Alerta: ${a.nivel_alerta ?? '?'}`)
+      if (a.resumen) lines.push(`  Resumen: ${a.resumen}`)
+      if (a.prediccion) lines.push(`  Predicción: ${a.prediccion}`)
+      const alertas = (a.alertas as {titulo: string; prioridad: string}[] | null) ?? []
+      if (alertas.length) {
+        lines.push(`  Alertas: ${alertas.map(al => `[${al.prioridad?.toUpperCase()}] ${al.titulo}`).join(' | ')}`)
+      }
+    }
+    lines.push('')
+  }
+
+  // Último digest
   if (digestRes.data?.length) {
     const ultimo = digestRes.data[0]
-    lines.push(`ÚLTIMO RESUMEN: ${ultimo.resumen_ejecutivo}`)
+    lines.push('━━━ ÚLTIMO RESUMEN EJECUTIVO ━━━')
+    lines.push(ultimo.resumen_ejecutivo ?? '')
     const json = ultimo.json_completo as Record<string, unknown>
-    const urgentes = json?.urgentes as { titulo: string; detalle: string }[] ?? []
-    const importantes = json?.importantes as { titulo: string; detalle: string }[] ?? []
-    const utiles = json?.utiles_mañana as string[] ?? []
+    const urgentes = (json?.urgentes as {titulo: string; detalle: string}[]) ?? []
+    const importantes = (json?.importantes as {titulo: string; detalle: string}[]) ?? []
+    const utiles = (json?.utiles_mañana as string[]) ?? []
     if (urgentes.length) {
       lines.push('\n🔴 URGENTE:')
       urgentes.forEach(u => lines.push(`  - ${u.titulo}: ${u.detalle}`))
@@ -45,25 +89,51 @@ export async function buildContext(): Promise<string> {
       lines.push('\n🟡 IMPORTANTE:')
       importantes.forEach(i => lines.push(`  - ${i.titulo}: ${i.detalle}`))
     }
-    if (utiles.length) {
-      lines.push('\n🎒 ÚTILES MAÑANA: ' + utiles.join(', '))
-    }
+    if (utiles.length) lines.push('\n🎒 ÚTILES MAÑANA: ' + utiles.join(', '))
+    lines.push('')
   }
 
+  // Próximas fechas
   if (fechasRes.data?.length) {
-    lines.push('\n📅 PRÓXIMAS FECHAS:')
-    fechasRes.data.forEach(f => {
-      const alumno = f.alumno ? ` (${f.alumno})` : ''
-      lines.push(`  - ${f.fecha_evento}: ${f.titulo} ${f.asignatura ? `[${f.asignatura}]` : ''}${alumno}`)
-    })
+    lines.push('━━━ PRÓXIMAS FECHAS (14 días) ━━━')
+    fechasRes.data
+      .filter(f => !primerNombre || f.alumno?.toLowerCase().includes(primerNombre.toLowerCase()))
+      .forEach(f => {
+        const alumno = f.alumno ? ` (${f.alumno.split(' ')[0]})` : ''
+        lines.push(`  - ${f.fecha_evento}: ${f.titulo} ${f.asignatura ? `[${f.asignatura}]` : ''}${alumno}`)
+      })
+    lines.push('')
   }
 
+  // Notas recientes
   if (notasRes.data?.length) {
-    lines.push('\n📊 NOTAS RECIENTES:')
-    notasRes.data.forEach(n => {
-      const vs = n.promedio_curso ? ` (promedio curso: ${n.promedio_curso})` : ''
-      lines.push(`  - ${n.alumno ?? 'Clemente'} | ${n.asignatura}: ${n.nota}${vs} — ${n.descripcion ?? n.tipo}`)
+    lines.push('━━━ NOTAS RECIENTES ━━━')
+    const filtradas = notasRes.data.filter(n =>
+      !primerNombre || (n.alumno ?? '').toLowerCase().includes(primerNombre.toLowerCase())
+    )
+    filtradas.forEach(n => {
+      const vs = n.promedio_curso ? ` (prom. curso: ${n.promedio_curso})` : ''
+      const nombre = (n.alumno ?? 'Alumno').split(' ')[0]
+      lines.push(`  - ${nombre} | ${n.asignatura}: ${n.nota ?? '–'}${vs} — ${n.descripcion ?? n.tipo ?? ''}`)
     })
+    lines.push('')
+  }
+
+  // Anotaciones recientes
+  if (anotacionesRes.data?.length) {
+    const filtradas = anotacionesRes.data.filter(a =>
+      !primerNombre || (a.alumno ?? '').toLowerCase().includes(primerNombre.toLowerCase())
+    )
+    if (filtradas.length) {
+      lines.push('━━━ ANOTACIONES RECIENTES (30 días) ━━━')
+      filtradas.forEach(a => {
+        const nombre = (a.alumno ?? 'Alumno').split(' ')[0]
+        const tipo = (a.tipo ?? 'observacion').toUpperCase()
+        const texto = a.titulo ?? a.descripcion ?? ''
+        lines.push(`  - ${nombre} [${tipo}] ${a.fecha ?? ''}: ${texto}`)
+      })
+      lines.push('')
+    }
   }
 
   return lines.join('\n')
