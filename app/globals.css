@@ -32,6 +32,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
+a { cursor: pointer; }
+
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
   user-select: none;

@@ -28,7 +28,7 @@ export default function RootLayout({
         {/* Header fijo */}
         <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-14"
           style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-          <Link href="/dashboard" className="flex items-center gap-3 cursor-pointer">
+          <Link href="/dashboard" className="flex items-center gap-3" style={{ cursor: 'pointer', WebkitTapHighlightColor: 'rgba(30,58,138,0.1)' }}>
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
               style={{ backgroundColor: '#1e3a8a' }}>
               <svg viewBox="0 0 64 64" width="20" height="20">
