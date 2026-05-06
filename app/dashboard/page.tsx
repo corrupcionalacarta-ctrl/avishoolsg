@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import RefreshButton from './RefreshButton'
 import CalendarioFechas from './CalendarioFechas'
+import UrgentesSection from './UrgentesSection'
 
 const ALUMNOS = [
   { slug: 'clemente', nombre: 'Clemente', color: '#1e3a8a' },
@@ -245,62 +246,10 @@ export default async function DashboardPage() {
       )}
 
       {/* 3. REQUIEREN ACCIÓN */}
-      {urgentes.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#ef4444' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Requieren Acción</h2>
-          </div>
-          {urgentes.map((u, i) => (
-            <details key={i} className="rounded-xl overflow-hidden group"
-              style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-              <summary className="p-4 flex items-start gap-3 cursor-pointer list-none">
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#ef4444', fontSize: 18 }}>warning</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{u.titulo}</p>
-                  {u.dia && (
-                    <p className="text-[11px] mt-0.5 uppercase font-semibold" style={{ color: '#ef4444' }}>{u.dia}</p>
-                  )}
-                </div>
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5 transition-transform group-open:rotate-180"
-                  style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
-              </summary>
-              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #fca5a544' }}>
-                <p className="text-[13px] leading-5" style={{ color: '#475569' }}>{u.detalle}</p>
-              </div>
-            </details>
-          ))}
-        </section>
-      )}
+      <UrgentesSection urgentes={urgentes} tipo="urgente" />
 
       {/* 4. IMPORTANTE ESTA SEMANA */}
-      {importantes.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#7c3aed' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Importante esta semana</h2>
-          </div>
-          {importantes.map((u, i) => (
-            <details key={i} className="rounded-xl overflow-hidden group"
-              style={{ backgroundColor: '#faf5ff', border: '1px solid #e9d5ff', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-              <summary className="p-4 flex items-start gap-3 cursor-pointer list-none">
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5" style={{ color: '#7c3aed', fontSize: 18 }}>info</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{u.titulo}</p>
-                  {u.dias_restantes !== undefined && u.dias_restantes > 0 && (
-                    <p className="text-[11px] mt-0.5" style={{ color: '#94a3b8' }}>en {u.dias_restantes} día{u.dias_restantes !== 1 ? 's' : ''}</p>
-                  )}
-                </div>
-                <span className="material-symbols-outlined flex-shrink-0 mt-0.5 transition-transform group-open:rotate-180"
-                  style={{ color: '#94a3b8', fontSize: 18 }}>expand_more</span>
-              </summary>
-              <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #e2e8f080' }}>
-                <p className="text-[13px] leading-5" style={{ color: '#475569' }}>{u.detalle}</p>
-              </div>
-            </details>
-          ))}
-        </section>
-      )}
+      <UrgentesSection urgentes={importantes} tipo="importante" />
 
       {/* 5. CALENDARIO DE FECHAS */}
       <CalendarioFechas fechas={allFechas} titulo="Próximas Fechas" />
