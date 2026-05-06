@@ -111,7 +111,7 @@ export function calcRiesgo(
       : []
 
     if (!notasAsig.length) {
-      return { ...f, fecha: f.fecha_evento, promHistorico: null, nivel: 'sin_datos' }
+      return { ...f, fecha: f.fecha_evento, promHistorico: null, nivel: 'sin_datos' as const }
     }
 
     const prom = notasAsig.reduce((s, n) => s + (n.nota ?? 0), 0) / notasAsig.length

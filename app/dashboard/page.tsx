@@ -13,7 +13,7 @@ const ALUMNOS = [
 export const dynamic = 'force-dynamic'
 
 type NotaRow = { alumno: string | null; asignatura: string; nota: number | null; promedio_curso: number | null; fecha: string | null }
-type AnotRow = { alumno: string | null; tipo: string | null; fecha: string | null }
+type AnotRow = { alumno: string | null; tipo: string | null; fecha: string | null; titulo: string | null; descripcion: string | null }
 type FechaRow = { titulo: string; fecha_evento: string; asignatura: string | null; alumno: string | null; detalle: string | null }
 type AnalisisRow = { alumno: string; tendencia_academica: string | null; nivel_alerta: string | null }
 type UrgItem = { titulo: string; detalle: string; dia?: string }
