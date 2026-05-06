@@ -25,12 +25,13 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
   const hace60 = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().split('T')[0]
   const hoy = new Date().toISOString().split('T')[0]
 
-  const [notasRes, anotRes, analisisRes, asistRes, fechasRes] = await Promise.all([
+  const [notasRes, anotRes, analisisRes, asistRes, fechasRes, classroomRes] = await Promise.all([
     supabase.from('notas').select('asignatura, nota, promedio_curso, tipo, descripcion, fecha').ilike('alumno', `%${slug}%`).order('fecha', { ascending: false }).limit(100),
     supabase.from('anotaciones').select('tipo, titulo, descripcion, fecha, asignatura').ilike('alumno', `%${slug}%`).gte('fecha', hace60).order('fecha', { ascending: false }),
     supabase.from('analisis_alumno').select('resumen, tendencia_academica, tendencia_conducta, nivel_alerta, prediccion, alertas, recomendaciones, generado_en').ilike('alumno', `%${slug}%`).order('generado_en', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('asistencia').select('asistencia_pct, inasistencias, atrasos, prof_jefe, inasistencias_detalle, atrasos_detalle').ilike('alumno', `%${slug}%`).maybeSingle(),
     supabase.from('items_colegio').select('titulo, fecha_evento, asignatura').eq('categoria', 'fecha_proxima').gte('fecha_evento', hoy).or(`alumno.ilike.%${slug}%,alumno.is.null`).order('fecha_evento').limit(10),
+    supabase.from('classroom').select('curso, titulo, tipo, fecha_entrega, estado, calificacion, link').ilike('alumno', `%${slug}%`).order('fecha_entrega', { ascending: true, nullsFirst: false }).limit(50),
   ])
 
   const notas    = (notasRes.data    ?? []) as { asignatura: string; nota: number | null; promedio_curso: number | null; tipo: string | null; descripcion: string | null; fecha: string | null }[]
@@ -42,6 +43,10 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
   const inasDetalle = ((asist as any)?.inasistencias_detalle ?? []) as InasDetalle[]
   const atrasoDetalle = ((asist as any)?.atrasos_detalle ?? []) as AtrasoDetalle[]
   const fechas   = (fechasRes.data   ?? []) as { titulo: string; fecha_evento: string; asignatura: string | null }[]
+  type ClassroomItem = { curso: string; titulo: string; tipo: string | null; fecha_entrega: string | null; estado: string | null; calificacion: string | null; link: string | null }
+  const classroom = (classroomRes.data ?? []) as ClassroomItem[]
+  const classroomPendiente = classroom.filter(c => c.estado === 'pendiente' || c.estado === 'atrasado')
+  const classroomEntregado = classroom.filter(c => c.estado === 'entregado' || c.estado === 'calificado' || c.estado === 'devuelto')
 
   const semData   = semaforo(notas)
   const correlData = correlacionSemanal(notas, anot)
@@ -379,6 +384,95 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
                   </span>
                 </div>
               )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* GOOGLE CLASSROOM */}
+      {classroom.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#4285f4' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Google Classroom</h2>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-full font-bold"
+              style={{ backgroundColor: classroomPendiente.length > 0 ? '#fee2e2' : '#f1f5f9', color: classroomPendiente.length > 0 ? '#ef4444' : '#64748b' }}>
+              {classroomPendiente.length} pendiente{classroomPendiente.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #e2e8f0', backgroundColor: '#ffffff', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            {classroom.map((item, i) => {
+              const isAtrasado = item.estado === 'atrasado'
+              const isPendiente = item.estado === 'pendiente'
+              const isEntregado = item.estado === 'entregado' || item.estado === 'calificado' || item.estado === 'devuelto'
+
+              const estadoColor = isAtrasado ? '#ef4444' : isPendiente ? '#d97706' : '#16a34a'
+              const estadoLabel = isAtrasado ? 'ATRASADO' : isPendiente ? 'Pendiente' :
+                                  item.estado === 'calificado' ? 'Calificado' :
+                                  item.estado === 'devuelto' ? 'Devuelto' : 'Entregado'
+
+              const hoyMs = Date.now()
+              let daysLeft: number | null = null
+              if (item.fecha_entrega && (isPendiente || isAtrasado)) {
+                const d = new Date(item.fecha_entrega + 'T12:00:00')
+                daysLeft = Math.ceil((d.getTime() - hoyMs) / 86400000)
+              }
+
+              const content = (
+                <div key={i} className="flex items-start gap-3 px-4 py-3"
+                  style={{ borderBottom: i < classroom.length - 1 ? '1px solid #f8fafc' : 'none',
+                           opacity: isEntregado ? 0.6 : 1 }}>
+
+                  {/* Status dot */}
+                  <span className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: estadoColor }} />
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-2">
+                      <p className="text-[13px] font-semibold flex-1 leading-snug"
+                        style={{ color: '#1e293b', textDecoration: isEntregado ? 'line-through' : 'none' }}>
+                        {item.titulo}
+                      </p>
+                      {item.calificacion && (
+                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                          style={{ backgroundColor: '#dbeafe', color: '#1e40af' }}>
+                          {item.calificacion}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-[10px]" style={{ color: '#94a3b8' }}>{item.curso}</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: estadoColor + '15', color: estadoColor }}>
+                        {estadoLabel}
+                      </span>
+                      {daysLeft !== null && (
+                        <span className="text-[10px] font-semibold"
+                          style={{ color: daysLeft < 0 ? '#ef4444' : daysLeft <= 2 ? '#d97706' : '#64748b' }}>
+                          {daysLeft < 0 ? `${Math.abs(daysLeft)}d vencida` : daysLeft === 0 ? 'vence hoy' : daysLeft === 1 ? 'vence mañana' : `${daysLeft}d`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Fecha + link */}
+                  <div className="flex-shrink-0 text-right">
+                    {item.fecha_entrega && (
+                      <p className="text-[10px]" style={{ color: '#94a3b8' }}>
+                        {new Date(item.fecha_entrega + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                      </p>
+                    )}
+                    {item.link && (
+                      <a href={item.link} target="_blank" rel="noopener noreferrer">
+                        <span className="material-symbols-outlined" style={{ color: '#4285f4', fontSize: 16 }}>open_in_new</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )
+
+              return content
             })}
           </div>
         </section>

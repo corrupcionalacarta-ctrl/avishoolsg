@@ -76,19 +76,9 @@ def step_gmail(hours: int = 24) -> bool:
     return run_step(f"gmail --hours {hours}", [PYTHON, str(HERE / "gmail_extractor.py"), "--hours", str(hours)])
 
 
-def step_classroom_pending(max_per_run: int = 5) -> bool:
-    """Procesa hasta N clases pendientes. Si no hay state, primero lista."""
-    state_file = OUTPUT_DIR / ".classroom_state.json"
-    if not state_file.exists():
-        log("[INFO] Sin state, listando clases primero...")
-        ok = run_step("classroom --list-classes", [PYTHON, str(HERE / "schoolnet_extractor.py"), "--list-classes"], timeout=300)
-        if not ok:
-            return False
-    return run_step(
-        f"classroom --all-pending-classroom (max {max_per_run})",
-        [PYTHON, str(HERE / "schoolnet_extractor.py"), "--all-pending-classroom", "--max-per-run", str(max_per_run)],
-        timeout=1800,
-    )
+def step_classroom() -> bool:
+    """Extrae tareas y cursos de Google Classroom para todos los alumnos."""
+    return run_step("classroom", [PYTHON, str(HERE / "classroom_extractor.py")], timeout=300)
 
 
 def step_schoolnet() -> bool:
@@ -126,7 +116,7 @@ def main():
         results["gmail"] = step_gmail(hours=168)  # 7 días
         results["schoolnet"] = step_schoolnet()
         results["grades"] = step_grades()
-        results["classroom"] = step_classroom_pending(max_per_run=5)
+        results["classroom"] = step_classroom()
         results["ai_analysis"] = step_ai_analysis()
     elif args.evening:
         results["gmail"] = step_gmail(hours=168)  # 7 días
