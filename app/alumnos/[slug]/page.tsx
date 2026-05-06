@@ -42,8 +42,9 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
   const semData   = semaforo(notas)
   const correlData = correlacionSemanal(notas, anot)
 
-  const negativas = anot.filter(a => a.tipo === 'negativa')
-  const positivas = anot.filter(a => a.tipo === 'positiva')
+  const negativas     = anot.filter(a => a.tipo === 'negativa')
+  const positivas     = anot.filter(a => a.tipo === 'positiva')
+  const observaciones = anot.filter(a => a.tipo === 'observacion' || (a.tipo !== 'negativa' && a.tipo !== 'positiva'))
 
   const maxNota = 7.0
   const alertas   = (analisis?.alertas        as { titulo: string; prioridad: string }[] | null) ?? []
@@ -235,27 +236,77 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
       )}
 
       {/* ANOTACIONES RECIENTES */}
-      {(negativas.length > 0 || positivas.length > 0) && (
-        <section className="space-y-2">
+      {anot.length > 0 && (
+        <section className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#6366f1' }} />
-            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Anotaciones recientes</h2>
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Anotaciones</h2>
             <span className="text-[11px]" style={{ color: '#94a3b8' }}>(60 días)</span>
           </div>
-          {[...negativas.slice(0, 3), ...positivas.slice(0, 2)].sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? '')).map((a, i) => (
-            <div key={i} className="rounded-xl p-3 flex items-start gap-3"
-              style={{ backgroundColor: a.tipo === 'negativa' ? '#fef2f2' : '#f0fdf4', border: `1px solid ${a.tipo === 'negativa' ? '#fca5a5' : '#86efac'}` }}>
-              <span className="material-symbols-outlined flex-shrink-0 mt-0.5"
-                style={{ color: a.tipo === 'negativa' ? '#ef4444' : '#16a34a', fontSize: 16 }}>
-                {a.tipo === 'negativa' ? 'report' : 'thumb_up'}
-              </span>
-              <div className="flex-1 min-w-0">
-                {a.titulo && <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{a.titulo}</p>}
-                {a.descripcion && <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{a.descripcion}</p>}
-                <p className="text-[10px] mt-0.5" style={{ color: '#94a3b8' }}>{a.fecha}</p>
-              </div>
+
+          {/* Resumen visual */}
+          <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <div className="flex items-center justify-between gap-2">
+              {[
+                { label: 'Positivas', count: positivas.length, color: '#16a34a', bg: '#dcfce7', icon: 'thumb_up' },
+                { label: 'Negativas', count: negativas.length, color: '#ef4444', bg: '#fee2e2', icon: 'report' },
+                { label: 'Observaciones', count: observaciones.length, color: '#6366f1', bg: '#e0e7ff', icon: 'visibility' },
+              ].map(({ label, count, color, bg, icon }) => (
+                <div key={label} className="flex-1 flex flex-col items-center gap-1 py-2 rounded-xl" style={{ backgroundColor: bg }}>
+                  <span className="material-symbols-outlined" style={{ color, fontSize: 18, fontVariationSettings: "'FILL' 1" }}>{icon}</span>
+                  <p className="text-[22px] font-black leading-none" style={{ color }}>{count}</p>
+                  <p className="text-[10px] font-semibold text-center leading-tight" style={{ color }}>{label}</p>
+                </div>
+              ))}
             </div>
-          ))}
+
+            {/* Barra proporcional */}
+            {anot.length > 0 && (
+              <div className="h-2 rounded-full overflow-hidden flex gap-0.5">
+                {positivas.length > 0 && (
+                  <div className="h-full rounded-l-full" style={{ width: `${(positivas.length / anot.length) * 100}%`, backgroundColor: '#16a34a' }} />
+                )}
+                {observaciones.length > 0 && (
+                  <div className="h-full" style={{ width: `${(observaciones.length / anot.length) * 100}%`, backgroundColor: '#6366f1' }} />
+                )}
+                {negativas.length > 0 && (
+                  <div className="h-full rounded-r-full" style={{ width: `${(negativas.length / anot.length) * 100}%`, backgroundColor: '#ef4444' }} />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Lista completa ordenada por fecha */}
+          <div className="space-y-2">
+            {[...anot].sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? '')).map((a, i) => {
+              const isNeg  = a.tipo === 'negativa'
+              const isPos  = a.tipo === 'positiva'
+              const bg     = isNeg ? '#fef2f2' : isPos ? '#f0fdf4' : '#f5f3ff'
+              const border = isNeg ? '#fca5a5' : isPos ? '#86efac' : '#c4b5fd'
+              const color  = isNeg ? '#ef4444'  : isPos ? '#16a34a'  : '#6366f1'
+              const icon   = isNeg ? 'report'   : isPos ? 'thumb_up' : 'visibility'
+              return (
+                <div key={i} className="rounded-xl p-3 flex items-start gap-3"
+                  style={{ backgroundColor: bg, border: `1px solid ${border}` }}>
+                  <span className="material-symbols-outlined flex-shrink-0 mt-0.5"
+                    style={{ color, fontSize: 16, fontVariationSettings: "'FILL' 1" }}>
+                    {icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    {a.titulo && <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{a.titulo}</p>}
+                    {a.descripcion && <p className="text-[12px] leading-5" style={{ color: '#475569' }}>{a.descripcion}</p>}
+                    <p className="text-[10px] mt-0.5" style={{ color: '#94a3b8' }}>
+                      {a.fecha}{a.asignatura ? ` · ${a.asignatura}` : ''}
+                    </p>
+                  </div>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase shrink-0"
+                    style={{ backgroundColor: color + '20', color }}>
+                    {isNeg ? 'neg' : isPos ? 'pos' : 'obs'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </section>
       )}
 
