@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import NavBar from "./NavBar";
+import Link from "next/link";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,7 +28,7 @@ export default function RootLayout({
         {/* Header fijo */}
         <header className="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-14"
           style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-          <div className="flex items-center gap-3">
+          <Link href="/dashboard" className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
               style={{ backgroundColor: '#1e3a8a' }}>
               <svg viewBox="0 0 64 64" width="20" height="20">
@@ -41,7 +42,7 @@ export default function RootLayout({
               <h1 className="text-[15px] font-bold leading-tight tracking-tight" style={{ color: '#1e3a8a' }}>AVI School</h1>
               <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#d97706' }}>Saint George</p>
             </div>
-          </div>
+          </Link>
           <span className="text-[11px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg"
             style={{ backgroundColor: '#fef3c7', color: '#d97706', border: '1px solid #fcd34d' }}>
             {new Date().toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}
