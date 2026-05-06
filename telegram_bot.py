@@ -217,6 +217,52 @@ def build_context(alumno_filtro: str | None = None) -> str:
         except Exception as e:
             print(f"[WARN] anotaciones: {e}")
 
+    # --- Supabase: Classroom tareas ---
+    if sb:
+        try:
+            q = sb.table("classroom") \
+                .select("alumno, curso, titulo, tipo, fecha_entrega, estado, calificacion, link") \
+                .order("fecha_entrega").limit(40).execute()
+            tareas = q.data or []
+            if primer_nombre:
+                tareas = [t for t in tareas if primer_nombre.lower() in (t.get("alumno") or "").lower()]
+            if tareas:
+                lines.append("━━━ GOOGLE CLASSROOM — TAREAS ━━━")
+                for t in tareas:
+                    nombre = (t.get("alumno") or "Alumno").split()[0]
+                    fecha  = f" | entrega: {t['fecha_entrega']}" if t.get("fecha_entrega") else ""
+                    cal    = f" | nota: {t['calificacion']}" if t.get("calificacion") else ""
+                    link   = f" → {t['link']}" if t.get("link") else ""
+                    lines.append(f"  - {nombre} [{t.get('curso','')}] {t.get('titulo','')} ({t.get('estado','?')}){fecha}{cal}{link}")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] classroom: {e}")
+
+    # --- Supabase: Classroom materiales ---
+    if sb:
+        try:
+            q = sb.table("classroom_materiales") \
+                .select("alumno, curso, tarea_titulo, nombre, url, tipo") \
+                .limit(100).execute()
+            mats = q.data or []
+            if primer_nombre:
+                mats = [m for m in mats if primer_nombre.lower() in (m.get("alumno") or "").lower()]
+            if mats:
+                # Agrupar por curso
+                by_curso: dict[str, list] = {}
+                for m in mats:
+                    curso = m.get("curso", "Sin curso")
+                    by_curso.setdefault(curso, []).append(m)
+                lines.append("━━━ GOOGLE CLASSROOM — MATERIALES DE ESTUDIO ━━━")
+                for curso, items in by_curso.items():
+                    lines.append(f"  [{curso}]")
+                    for m in items:
+                        tipo = f"({m['tipo']})" if m.get("tipo") else ""
+                        lines.append(f"    - {m.get('nombre','')} {tipo} → {m.get('url','')}")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] classroom_materiales: {e}")
+
     return "\n".join(lines)
 
 

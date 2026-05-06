@@ -9,7 +9,7 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
     ? alumnoFiltro.charAt(0).toUpperCase() + alumnoFiltro.slice(1)
     : null
 
-  const [digestRes, fechasRes, notasRes, anotacionesRes, analisisRes] = await Promise.all([
+  const [digestRes, fechasRes, notasRes, anotacionesRes, analisisRes, classroomRes, materialesRes] = await Promise.all([
     supabase
       .from('digests')
       .select('resumen_ejecutivo, json_completo, created_at')
@@ -43,6 +43,19 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
       .select('alumno, resumen, tendencia_academica, tendencia_conducta, nivel_alerta, prediccion, alertas, recomendaciones, generado_en')
       .order('generado_en', { ascending: false })
       .limit(4),
+
+    // Tareas Classroom (pendientes primero)
+    supabase
+      .from('classroom')
+      .select('alumno, curso, titulo, tipo, fecha_entrega, estado, calificacion, link')
+      .order('fecha_entrega', { ascending: true, nullsFirst: false })
+      .limit(40),
+
+    // Materiales de Classroom
+    supabase
+      .from('classroom_materiales')
+      .select('alumno, curso, tarea_titulo, nombre, url, tipo')
+      .limit(100),
   ])
 
   const lines: string[] = ['=== CONTEXTO ESCOLAR AVI SCHOOL ===']
@@ -132,6 +145,48 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
         const texto = a.titulo ?? a.descripcion ?? ''
         lines.push(`  - ${nombre} [${tipo}] ${a.fecha ?? ''}: ${texto}`)
       })
+      lines.push('')
+    }
+  }
+
+  // Google Classroom — tareas
+  if (classroomRes.data?.length) {
+    const filtradas = classroomRes.data.filter(c =>
+      !primerNombre || (c.alumno ?? '').toLowerCase().includes(primerNombre.toLowerCase())
+    )
+    if (filtradas.length) {
+      lines.push('━━━ GOOGLE CLASSROOM — TAREAS ━━━')
+      filtradas.forEach(c => {
+        const nombre = (c.alumno ?? 'Alumno').split(' ')[0]
+        const fecha = c.fecha_entrega ? ` | entrega: ${c.fecha_entrega}` : ''
+        const cal = c.calificacion ? ` | nota: ${c.calificacion}` : ''
+        const link = c.link ? ` → ${c.link}` : ''
+        lines.push(`  - ${nombre} [${c.curso}] ${c.titulo} (${c.estado ?? '?'})${fecha}${cal}${link}`)
+      })
+      lines.push('')
+    }
+  }
+
+  // Google Classroom — materiales
+  if (materialesRes.data?.length) {
+    const filtrados = materialesRes.data.filter(m =>
+      !primerNombre || (m.alumno ?? '').toLowerCase().includes(primerNombre.toLowerCase())
+    )
+    if (filtrados.length) {
+      // Agrupar por curso
+      const byCurso: Record<string, typeof filtrados> = {}
+      for (const m of filtrados) {
+        if (!byCurso[m.curso]) byCurso[m.curso] = []
+        byCurso[m.curso].push(m)
+      }
+      lines.push('━━━ GOOGLE CLASSROOM — MATERIALES DE ESTUDIO ━━━')
+      for (const [curso, mats] of Object.entries(byCurso)) {
+        lines.push(`  [${curso}]`)
+        mats.forEach(m => {
+          const tipo = m.tipo ? `(${m.tipo})` : ''
+          lines.push(`    - ${m.nombre} ${tipo} → ${m.url}`)
+        })
+      }
       lines.push('')
     }
   }

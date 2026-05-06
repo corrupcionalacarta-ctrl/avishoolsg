@@ -44,3 +44,19 @@ CREATE TABLE IF NOT EXISTS classroom (
 CREATE INDEX IF NOT EXISTS idx_classroom_alumno   ON classroom (alumno);
 CREATE INDEX IF NOT EXISTS idx_classroom_fecha    ON classroom (fecha_entrega);
 CREATE INDEX IF NOT EXISTS idx_classroom_estado   ON classroom (estado);
+
+-- Materiales adjuntos de cada tarea de Classroom (PDFs, Docs, Slides, etc.)
+CREATE TABLE IF NOT EXISTS classroom_materiales (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  alumno         text NOT NULL,
+  curso          text NOT NULL,
+  tarea_titulo   text NOT NULL,
+  tarea_link     text,
+  nombre         text NOT NULL,
+  url            text NOT NULL,
+  tipo           text CHECK (tipo IN ('documento','presentacion','hoja','formulario','video','pdf','drive','sitio','archivo')),
+  actualizado_en timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_classroom_mat_alumno ON classroom_materiales (alumno);
+CREATE INDEX IF NOT EXISTS idx_classroom_mat_curso  ON classroom_materiales (curso);

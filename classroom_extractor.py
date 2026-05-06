@@ -312,6 +312,79 @@ async def get_course_assignments(page: Page, course: dict) -> list[dict]:
     return assignments
 
 
+async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
+    """
+    Navega a la página de detalle de una tarea y extrae los archivos adjuntos.
+    Retorna: [{nombre, url, tipo}]
+    Solo se llaman links a Google Drive/Docs/PDFs/YouTube — no links de navegación.
+    """
+    link = assignment.get("link", "")
+    if not link or "/c/" not in link:
+        return []
+
+    try:
+        await page.goto(link, wait_until="domcontentloaded", timeout=20000)
+        await asyncio.sleep(2)
+    except Exception as e:
+        print(f"       [WARN] No se pudo abrir tarea: {e}")
+        return []
+
+    materials = await page.evaluate("""() => {
+        const result = [];
+        const seen = new Set();
+
+        const links = [...document.querySelectorAll('a[href]')];
+        for (const a of links) {
+            const href = a.href || '';
+
+            // Solo links a servicios Google o archivos directos (no navegación interna)
+            const isContent = (
+                href.includes('drive.google.com') ||
+                href.includes('docs.google.com') ||
+                href.includes('slides.google.com') ||
+                href.includes('forms.google.com') ||
+                href.includes('youtube.com/watch') ||
+                href.includes('youtu.be/') ||
+                href.includes('sites.google.com') ||
+                /\\.pdf([?#]|$)/.test(href)
+            );
+            if (!isContent) continue;
+            if (seen.has(href)) continue;
+            seen.add(href);
+
+            // Tipo de material
+            let tipo = 'archivo';
+            if (href.includes('docs.google.com/document')) tipo = 'documento';
+            else if (href.includes('docs.google.com/presentation') || href.includes('slides.google.com')) tipo = 'presentacion';
+            else if (href.includes('docs.google.com/spreadsheets')) tipo = 'hoja';
+            else if (href.includes('docs.google.com/forms') || href.includes('forms.google.com')) tipo = 'formulario';
+            else if (href.includes('youtube.com') || href.includes('youtu.be')) tipo = 'video';
+            else if (href.includes('sites.google.com')) tipo = 'sitio';
+            else if (href.includes('drive.google.com')) tipo = 'drive';
+            else if (/\\.pdf/.test(href)) tipo = 'pdf';
+
+            // Nombre: prioridad aria-label → texto del link
+            const container = a.closest('[aria-label], [data-tooltip]') || a;
+            let nombre = (
+                container.getAttribute('aria-label') ||
+                container.getAttribute('data-tooltip') ||
+                a.getAttribute('aria-label') ||
+                a.getAttribute('title') ||
+                a.textContent
+            ).replace(/\\s+/g, ' ').trim();
+
+            // Quitar prefijos genéricos de Google
+            nombre = nombre.replace(/^(abrir|open|ver|view)\\s+/i, '').trim();
+            if (!nombre || nombre.length < 2 || nombre.length > 200) continue;
+
+            result.push({ nombre, url: href, tipo });
+        }
+        return result;
+    }""")
+
+    return materials
+
+
 async def get_course_announcements(page: Page, course: dict) -> list[dict]:
     """
     Extrae anuncios del stream del curso (últimos 7 días).
@@ -479,12 +552,53 @@ def push_classroom(alumno_nombre: str, items: list[dict]) -> bool:
         return False
 
 
+def push_classroom_materiales(alumno_nombre: str, materiales: list[dict]) -> bool:
+    """Persiste materiales de tareas Classroom en Supabase."""
+    url = (os.getenv("SUPABASE_URL") or "").strip()
+    key = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
+    if not url or not key:
+        return False
+
+    try:
+        from supabase import create_client
+        sb = create_client(url, key)
+
+        sb.table("classroom_materiales").delete().eq("alumno", alumno_nombre).execute()
+
+        if not materiales:
+            return True
+
+        rows = []
+        for m in materiales:
+            rows.append({
+                "alumno": alumno_nombre,
+                "curso": m.get("curso", ""),
+                "tarea_titulo": m.get("tarea_titulo", "")[:300],
+                "tarea_link": m.get("tarea_link", "")[:500],
+                "nombre": m.get("nombre", "")[:300],
+                "url": m.get("url", "")[:500],
+                "tipo": m.get("tipo", "archivo"),
+            })
+
+        sb.table("classroom_materiales").insert(rows).execute()
+        print(f"[OK] {alumno_nombre}: {len(rows)} materiales Classroom guardados")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Supabase push materiales: {e}")
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Pipeline principal
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def extract_alumno(alumno: dict, force_login: bool = False) -> list[dict]:
-    """Extrae todos los cursos y tareas de un alumno."""
+async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = True) -> tuple[list[dict], list[dict]]:
+    """
+    Extrae cursos, tareas y materiales adjuntos de un alumno.
+    deep=True (default): navega dentro de cada tarea para extraer archivos adjuntos.
+    Retorna (items, materiales).
+    """
     print(f"\n{'='*60}")
     print(f"[Classroom] {alumno['nombre']} ({alumno['email']})")
     print(f"{'='*60}")
@@ -497,46 +611,63 @@ async def extract_alumno(alumno: dict, force_login: bool = False) -> list[dict]:
             if force_login:
                 ok = await login_manual(page, alumno)
                 if not ok:
-                    return []
+                    return [], []
             else:
                 ok = await ensure_logged_in(page, alumno)
                 if not ok:
-                    return []
+                    return [], []
 
             # Obtener cursos
             courses = await get_courses(page)
             if not courses:
                 print(f"[WARN] No se encontraron cursos para {alumno['nombre']}")
-                return []
+                return [], []
 
             # Extraer tareas de cada curso
             all_items = []
             for course in courses:
                 assignments = await get_course_assignments(page, course)
-                # Parsear fechas
                 for a in assignments:
                     a["curso"] = course["nombre"]
                     a["fecha_entrega"] = parse_fecha_classroom(a.pop("fecha_texto", ""))
                 all_items.extend(assignments)
 
-                # Anuncios (opcional, puede ser ruidoso)
-                # announcements = await get_course_announcements(page, course)
-                # for ann in announcements:
-                #     ann["curso"] = course["nombre"]
-                #     ann["fecha_entrega"] = parse_fecha_classroom(ann.pop("fecha_texto", ""))
-                # all_items.extend(announcements)
+            print(f"\n[RESUMEN] {alumno['nombre']}: {len(all_items)} tareas en {len(courses)} cursos")
 
-            print(f"\n[RESUMEN] {alumno['nombre']}: {len(all_items)} items en {len(courses)} cursos")
+            # Extraer materiales adjuntos (navegando dentro de cada tarea)
+            all_materiales = []
+            if deep and all_items:
+                # Limitar a 25 tareas para no tardar demasiado
+                # Priorizar: pendientes primero, luego el resto
+                sorted_items = (
+                    [i for i in all_items if i.get("estado") in ("pendiente", "atrasado")] +
+                    [i for i in all_items if i.get("estado") not in ("pendiente", "atrasado")]
+                )
+                items_for_materials = sorted_items[:25]
+
+                print(f"[INFO] Extrayendo materiales de {len(items_for_materials)} tareas...")
+                for item in items_for_materials:
+                    mats = await get_assignment_materials(page, item)
+                    for m in mats:
+                        m["curso"] = item["curso"]
+                        m["tarea_titulo"] = item["titulo"]
+                        m["tarea_link"] = item.get("link", "")
+                    if mats:
+                        print(f"       {item['titulo'][:50]}: {len(mats)} archivos")
+                    all_materiales.extend(mats)
+
+                print(f"[RESUMEN] {len(all_materiales)} materiales extraídos")
 
             # Guardar JSON debug
             debug_path = OUTPUT_DIR / f"debug_classroom_{alumno['slug']}.json"
             debug_path.write_text(
-                json.dumps(all_items, ensure_ascii=False, indent=2, default=str),
+                json.dumps({"items": all_items, "materiales": all_materiales},
+                           ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8"
             )
             print(f"[DEBUG] Guardado en {debug_path}")
 
-            return all_items
+            return all_items, all_materiales
 
         finally:
             await ctx.close()
@@ -561,9 +692,12 @@ async def main():
         print("        Configura ALUMNO_1_CLASSROOM y/o ALUMNO_2_CLASSROOM en .env")
         sys.exit(1)
 
+    deep = "--no-deep" not in sys.argv  # deep por defecto, desactivar con --no-deep
+
     for alumno in alumnos:
-        items = await extract_alumno(alumno, force_login=force_login)
+        items, materiales = await extract_alumno(alumno, force_login=force_login, deep=deep)
         push_classroom(alumno["nombre"], items)
+        push_classroom_materiales(alumno["nombre"], materiales)
 
 
 if __name__ == "__main__":
