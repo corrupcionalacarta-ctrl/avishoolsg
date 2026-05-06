@@ -100,6 +100,10 @@ def step_grades() -> bool:
     return run_step("grades", [PYTHON, str(HERE / "schoolnet_direct.py")], timeout=600)
 
 
+def step_ai_analysis() -> bool:
+    return run_step("ai_analysis", [PYTHON, str(HERE / "ai_analysis.py")], timeout=120)
+
+
 def step_digest(run_mode: str = "manual") -> bool:
     env = os.environ.copy()
     env["RUN_MODE"] = run_mode
@@ -123,6 +127,7 @@ def main():
         results["schoolnet"] = step_schoolnet()
         results["grades"] = step_grades()
         results["classroom"] = step_classroom_pending(max_per_run=5)
+        results["ai_analysis"] = step_ai_analysis()
     elif args.evening:
         results["gmail"] = step_gmail(hours=168)  # 7 días
     elif args.gmail_only:
