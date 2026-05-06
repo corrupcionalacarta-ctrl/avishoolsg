@@ -22,13 +22,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Python venv
+      - name: Crear venv si no existe
         shell: cmd
         run: |
           if not exist .venv (
             py -3.12 -m venv .venv
-            .venv\Scripts\pip install -r requirements.txt
           )
+
+      - name: Instalar dependencias (siempre actualiza)
+        shell: cmd
+        run: |
+          .venv\Scripts\pip install -r requirements.txt --quiet
 
       - name: Ejecutar análisis
         shell: cmd

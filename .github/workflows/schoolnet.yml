@@ -17,21 +17,25 @@ on:
 
 jobs:
   run:
-    runs-on: self-hosted        # ← corre en tu PC Windows
+    runs-on: self-hosted
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Python venv
+      - name: Crear venv si no existe
         shell: cmd
         run: |
           if not exist .venv (
             py -3.12 -m venv .venv
-            .venv\Scripts\pip install -r requirements.txt
-            .venv\Scripts\playwright install chromium
           )
+
+      - name: Instalar dependencias (siempre actualiza)
+        shell: cmd
+        run: |
+          .venv\Scripts\pip install -r requirements.txt --quiet
+          .venv\Scripts\playwright install chromium
 
       - name: Ejecutar pipeline
         shell: cmd
