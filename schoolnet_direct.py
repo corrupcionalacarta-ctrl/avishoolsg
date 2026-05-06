@@ -198,14 +198,19 @@ def parse_calificaciones_json(data: dict) -> list[dict]:
     All fields are parallel arrays indexed by subject row.
 
     SchoolNet returns each subject twice:
-      - Clean name: "Lenguaje y comunicación" (may be esmadre=0 or =1)
-      - Suffixed dup: "Lenguaje y comunicación. [06-D]" or "Asig g2 [06-ABCDE]"
-    We skip the suffixed duplicates and keep the clean name row.
-    esmadre is NOT used as a filter — any row with a nota final is valid.
+      - Clean name: "Lenguaje y comunicación" (incidepromoficial="1") — subject header
+      - Suffixed dup: "Lenguaje y comunicación. [06-D]" — skip always
+    Individual assessment rows follow each subject header (incidepromoficial="" or "0").
+
+    We capture:
+      - Subject headers as tipo="promedio" (the running average)
+      - Individual assessments as tipo="prueba" with asignatura=parent subject
+        even when nota is null (so parents can see what tests exist)
     """
-    nombres = data.get("nombre", [])
-    nf = data.get("nf", [])
-    gprom = data.get("gprom", [])
+    nombres   = data.get("nombre", [])
+    nf        = data.get("nf", [])
+    gprom     = data.get("gprom", [])
+    incide    = data.get("incidepromoficial", [])
 
     def _parse_nota(s) -> float | None:
         if not s or s in ("", "&nbsp;"):
@@ -219,34 +224,49 @@ def parse_calificaciones_json(data: dict) -> list[dict]:
     _suffix_re = re.compile(r'\.?\s*(g\d+\s*)?\[[\dA-Z-]+\]\s*$')
 
     result = []
-    seen: set[str] = set()
+    seen_promedios: set[str] = set()
+    current_subject: str | None = None
 
     for i, nombre in enumerate(nombres):
         if not nombre or len(nombre) < 2:
             continue
-        # Skip the suffixed duplicate rows
+        # Skip suffixed duplicate rows — always
         if _suffix_re.search(nombre):
             continue
 
-        nota = _parse_nota(nf[i] if i < len(nf) else "")
-        prom = _parse_nota(gprom[i] if i < len(gprom) else "")
+        inc   = str(incide[i] if i < len(incide) else "")
+        nota  = _parse_nota(nf[i]   if i < len(nf)   else "")
+        prom  = _parse_nota(gprom[i] if i < len(gprom) else "")
+        clean = nombre.strip()
 
-        if nota is None and prom is None:
-            continue
-
-        key = nombre.strip().lower()
-        if key in seen:
-            continue
-        seen.add(key)
-
-        result.append({
-            "asignatura": nombre.strip(),
-            "tipo": "promedio",
-            "nota": nota,
-            "promedio_curso": prom,
-            "descripcion": "Nota Final",
-            "fecha": None,
-        })
+        if inc == "1":
+            # Subject header — carries the running average
+            key = clean.lower()
+            if key in seen_promedios:
+                continue
+            seen_promedios.add(key)
+            current_subject = clean
+            if nota is not None or prom is not None:
+                result.append({
+                    "asignatura": current_subject,
+                    "tipo": "promedio",
+                    "nota": nota,
+                    "promedio_curso": prom,
+                    "descripcion": "Promedio",
+                    "fecha": None,
+                })
+        else:
+            # Individual assessment row — link to parent subject
+            if current_subject is None:
+                continue
+            result.append({
+                "asignatura": current_subject,
+                "tipo": "prueba",
+                "nota": nota,           # None = not graded yet
+                "promedio_curso": None,
+                "descripcion": clean,   # test name, e.g. "Prueba Unidad 1 + HCL"
+                "fecha": None,
+            })
 
     return result
 

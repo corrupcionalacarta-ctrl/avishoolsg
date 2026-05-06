@@ -129,7 +129,9 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
               const meta = SEMAFORO_META[s.color]
               const barWidth = Math.min(100, (s.promAlumno / maxNota) * 100)
               return (
-                <div key={i} className="rounded-xl p-3" style={{ backgroundColor: meta.bg, border: `1px solid ${meta.border}` }}>
+                <Link key={i} href={`/alumnos/${slug}/notas/${encodeURIComponent(s.asignatura)}`}
+                  className="block rounded-xl p-3 active:scale-[0.98] transition-transform"
+                  style={{ backgroundColor: meta.bg, border: `1px solid ${meta.border}` }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[13px] font-bold" style={{ color: '#1e293b' }}>{s.asignatura}</p>
                     <div className="flex items-center gap-2">
@@ -137,6 +139,7 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
                         <p className="text-[11px]" style={{ color: '#94a3b8' }}>curso: {s.promCurso}</p>
                       )}
                       <p className="text-[15px] font-black" style={{ color: meta.color }}>{s.promAlumno}</p>
+                      <span className="material-symbols-outlined" style={{ color: '#cbd5e1', fontSize: 16 }}>chevron_right</span>
                     </div>
                   </div>
                   {/* Barra visual */}
@@ -152,7 +155,7 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
                       </p>
                     )}
                   </div>
-                </div>
+                </Link>
               )
             })}
           </div>
