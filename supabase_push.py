@@ -33,8 +33,12 @@ def push_digest(classified: dict, n_items: int, run_mode: str = "manual") -> boo
 
     try:
         sb = create_client(url, key)
+        hoy = datetime.now().strftime("%Y-%m-%d")
 
-        # 1. Insert digest principal
+        # 1. Borrar digest de hoy si ya existe (evita acumulación por doble ejecución)
+        sb.table("digests").delete().gte("created_at", f"{hoy}T00:00:00").execute()
+
+        # 2. Insert digest principal
         digest_row = {
             "run_mode": run_mode,
             "resumen_ejecutivo": classified.get("resumen_ejecutivo", ""),
@@ -48,7 +52,10 @@ def push_digest(classified: dict, n_items: int, run_mode: str = "manual") -> boo
         result = sb.table("digests").insert(digest_row).execute()
         digest_id = result.data[0]["id"]
 
-        # 2. Insert items individuales
+        # 2. Limpiar items del digest anterior (los que vienen del digest no tienen alumno)
+        sb.table("items_colegio").delete().is_("alumno", "null").execute()
+
+        # 3. Insert items individuales
         items_rows = []
         for categoria in ["urgentes", "importantes", "informativos"]:
             cat_singular = {"urgentes": "urgente", "importantes": "importante", "informativos": "informativo"}[categoria]
