@@ -107,71 +107,88 @@ async def api_fetch(page, path: str) -> dict | list | None:
 
 async def switch_student(page, student: dict) -> bool:
     """
-    Switches student using the jQuery SPA mechanism:
-    1. Click #linkcalificaciones to trigger $.ajax and render the student dropdown
-    2. Click #alum1 (or #alum0) in the rendered dropdown
-    3. Verify via api_fetch
-    Fallback: set 'rel' cookie directly via SubCookieUtil.seteaCookie()
+    Switches active student in SchoolNet session.
+
+    Strategy order:
+    1. SubCookieUtil.seteaCookie('rel', idx) — jQuery subcookie used by the app
+    2. document.cookie direct set — fallback if SubCookieUtil not available
+    3. Click #linkcalificaciones → click #alumN tab — UI-driven switch
+    4. Playwright context cookie override + /index reload — nuclear option
+
+    Each strategy verifies via api_fetch /calificaciones checking alumno == idx.
     """
     idx = student["index"]
     student_id = student["id"]  # "alum0" or "alum1"
     nombre_corto = student["nombre_corto"]
     print(f"[INFO] Switching a {nombre_corto} (idx={idx})...")
 
-    # Strategy 1: set cookie directly + re-trigger section load
+    async def _verify() -> bool:
+        data = await api_fetch(page, "/calificaciones")
+        if data and isinstance(data, dict) and str(data.get("alumno")) == str(idx):
+            print(f"[OK] Switch verificado: alumno={data.get('alumno')}")
+            return True
+        return False
+
+    # Strategy 1: SubCookieUtil (jQuery subcookie mechanism)
     try:
         await page.evaluate(f"SubCookieUtil.seteaCookie('rel', '{idx}')")
-        print(f"[INFO] Cookie 'rel' seteada a {idx}")
-        # Verify
-        data = await api_fetch(page, "/calificaciones")
-        if data and isinstance(data, dict) and data.get("alumno") == idx:
-            print(f"[OK] Switch via cookie: alumno={idx}")
+        await page.wait_for_timeout(800)
+        if await _verify():
             return True
+        print(f"[WARN] SubCookieUtil: cookie seteada pero alumno no cambió")
     except Exception as e:
-        print(f"[WARN] Cookie strategy: {e}")
+        print(f"[WARN] SubCookieUtil no disponible: {e}")
 
-    # Strategy 2: click nav item to render section, then click student tab
+    # Strategy 2: document.cookie direct (works if server reads 'rel' cookie directly)
     try:
-        # Click Calificaciones nav item to trigger jQuery AJAX + render UI
+        await page.evaluate(f"document.cookie = 'rel={idx}; path=/'")
+        await page.wait_for_timeout(800)
+        if await _verify():
+            return True
+        print(f"[WARN] document.cookie: cookie seteada pero alumno no cambió")
+    except Exception as e:
+        print(f"[WARN] document.cookie: {e}")
+
+    # Strategy 3: Click nav → student tab in the rendered UI
+    try:
         nav = page.locator("#linkcalificaciones")
         if await nav.count() > 0:
             await nav.click()
             await page.wait_for_timeout(3000)
-            print(f"[INFO] Clicked #linkcalificaciones, esperando dropdown...")
-
-            # Now try clicking the student tab (#alum0, #alum1)
+            # Try #alumN tab first
             tab = page.locator(f"#{student_id}")
             if await tab.count() > 0 and await tab.is_visible():
                 await tab.click()
                 await page.wait_for_timeout(2000)
-                print(f"[OK] Click en #{student_id}")
-                # Verify
-                data = await api_fetch(page, "/calificaciones")
-                if data and isinstance(data, dict):
-                    actual = data.get("alumno")
-                    print(f"[INFO] alumno={actual} (esperado={idx})")
-                    if str(actual) == str(idx):
-                        print(f"[OK] Switch verificado: alumno={actual}")
-                        return True
-            else:
-                print(f"[WARN] #{student_id} no visible — buscando por nombre...")
-                tab2 = page.locator(f"text={nombre_corto}").first
-                if await tab2.count() > 0:
-                    await tab2.click()
-                    await page.wait_for_timeout(2000)
-                    data = await api_fetch(page, "/calificaciones")
-                    if data and isinstance(data, dict) and str(data.get("alumno")) == str(idx):
-                        return True
+                if await _verify():
+                    return True
+            # Fallback: click by visible text
+            tab2 = page.locator(f"a:text-is('{nombre_corto}'), span:text-is('{nombre_corto}')").first
+            if await tab2.count() > 0:
+                await tab2.click()
+                await page.wait_for_timeout(2000)
+                if await _verify():
+                    return True
     except Exception as e:
-        print(f"[WARN] Nav click strategy: {e}")
+        print(f"[WARN] UI click strategy: {e}")
 
-    # Final check: even if click logic had issues, verify current alumno
-    data = await api_fetch(page, "/calificaciones")
-    if data and isinstance(data, dict) and str(data.get("alumno")) == str(idx):
-        print(f"[OK] Switch confirmado en fallback: alumno={data.get('alumno')}")
-        return True
+    # Strategy 4: Playwright-level cookie override + /index reload
+    try:
+        await page.context.add_cookies([{
+            "name": "rel",
+            "value": str(idx),
+            "domain": "schoolnet.colegium.com",
+            "path": "/",
+        }])
+        await page.goto(f"{BASE_URL}/index", wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+        if await _verify():
+            return True
+        print(f"[WARN] Cookie override + reload: alumno no cambió")
+    except Exception as e:
+        print(f"[WARN] Cookie override strategy: {e}")
 
-    print(f"[WARN] No se pudo hacer switch a {nombre_corto}")
+    print(f"[ERROR] No se pudo hacer switch a {nombre_corto} — se omiten sus datos")
     return False
 
 
@@ -179,12 +196,16 @@ def parse_calificaciones_json(data: dict) -> list[dict]:
     """
     Parses the columnar JSON from /calificaciones.
     All fields are parallel arrays indexed by subject row.
-    Only 'esmadre=1' rows are main subjects (skip detail/child rows).
+
+    SchoolNet returns each subject twice:
+      - Clean name: "Lenguaje y comunicación" (may be esmadre=0 or =1)
+      - Suffixed dup: "Lenguaje y comunicación. [06-D]" or "Asig g2 [06-ABCDE]"
+    We skip the suffixed duplicates and keep the clean name row.
+    esmadre is NOT used as a filter — any row with a nota final is valid.
     """
     nombres = data.get("nombre", [])
     nf = data.get("nf", [])
     gprom = data.get("gprom", [])
-    esmadre = data.get("esmadre", [])
 
     def _parse_nota(s) -> float | None:
         if not s or s in ("", "&nbsp;"):
@@ -194,12 +215,17 @@ def parse_calificaciones_json(data: dict) -> list[dict]:
         except (ValueError, TypeError):
             return None
 
+    # Regex: matches group-suffix at end like " [06-D]", ". [06-D]", " g2 [06-ABCDE]"
+    _suffix_re = re.compile(r'\.?\s*(g\d+\s*)?\[[\dA-Z-]+\]\s*$')
+
     result = []
+    seen: set[str] = set()
+
     for i, nombre in enumerate(nombres):
         if not nombre or len(nombre) < 2:
             continue
-        # Only parent/summary rows (esmadre='1'), skip detail rows
-        if i < len(esmadre) and esmadre[i] != "1":
+        # Skip the suffixed duplicate rows
+        if _suffix_re.search(nombre):
             continue
 
         nota = _parse_nota(nf[i] if i < len(nf) else "")
@@ -208,8 +234,13 @@ def parse_calificaciones_json(data: dict) -> list[dict]:
         if nota is None and prom is None:
             continue
 
+        key = nombre.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
         result.append({
-            "asignatura": nombre,
+            "asignatura": nombre.strip(),
             "tipo": "promedio",
             "nota": nota,
             "promedio_curso": prom,
@@ -260,12 +291,15 @@ def parse_conducta_json(data) -> list[dict]:
             tipo = "observacion"
 
         motivo = (obs.get("motivo", "") or "").strip()
+        # Strip (*) prefix used internally by SchoolNet
+        motivo = re.sub(r'^\(\*\)\s*', '', motivo).strip()
+
         detalle = (obs.get("obs", "") or "").strip()
-        # Store motivo as titulo, obs detail as descripcion
-        if detalle and detalle not in ("\xa0", " ", ""):
-            desc = detalle
-        else:
+        # Treat &nbsp; (literal or decoded \xa0) as empty
+        if detalle in ("&nbsp;", "\xa0", " ", ""):
             desc = ""
+        else:
+            desc = detalle
 
         result.append({
             "fecha": parse_fecha(obs.get("fecha")),
@@ -497,8 +531,12 @@ async def main():
                 "horario": [],
             }
 
-            # Always verify/switch to correct student
-            await switch_student(page, student)
+            # Switch to correct student — skip all data fetching if switch fails
+            switched = await switch_student(page, student)
+            if not switched:
+                print(f"[ERROR] Skip {nombre} — datos incorrectos si se continúa")
+                result["alumnos"].append(alumno)
+                continue
 
             # --- CALIFICACIONES (AJAX via api_fetch) ---
             try:
@@ -507,7 +545,7 @@ async def main():
                 if data and isinstance(data, dict):
                     alumno_actual = data.get("alumno")
                     if str(alumno_actual) != str(idx):
-                        print(f"[WARN] alumno={alumno_actual}, esperado={idx}")
+                        print(f"[WARN] alumno={alumno_actual}, esperado={idx} — datos pueden ser del alumno anterior")
                     notas = parse_calificaciones_json(data)
                     alumno["notas"] = notas
                     print(f"[OK] Notas: {len(notas)}")
