@@ -29,14 +29,18 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
     supabase.from('notas').select('asignatura, nota, promedio_curso, tipo, descripcion, fecha').ilike('alumno', `%${slug}%`).order('fecha', { ascending: false }).limit(100),
     supabase.from('anotaciones').select('tipo, titulo, descripcion, fecha, asignatura').ilike('alumno', `%${slug}%`).gte('fecha', hace60).order('fecha', { ascending: false }),
     supabase.from('analisis_alumno').select('resumen, tendencia_academica, tendencia_conducta, nivel_alerta, prediccion, alertas, recomendaciones, generado_en').ilike('alumno', `%${slug}%`).order('generado_en', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('asistencia').select('asistencia_pct, inasistencias, prof_jefe').ilike('alumno', `%${slug}%`).maybeSingle(),
+    supabase.from('asistencia').select('asistencia_pct, inasistencias, atrasos, prof_jefe, inasistencias_detalle, atrasos_detalle').ilike('alumno', `%${slug}%`).maybeSingle(),
     supabase.from('items_colegio').select('titulo, fecha_evento, asignatura').eq('categoria', 'fecha_proxima').gte('fecha_evento', hoy).or(`alumno.ilike.%${slug}%,alumno.is.null`).order('fecha_evento').limit(10),
   ])
 
   const notas    = (notasRes.data    ?? []) as { asignatura: string; nota: number | null; promedio_curso: number | null; tipo: string | null; descripcion: string | null; fecha: string | null }[]
   const anot     = (anotRes.data     ?? []) as { tipo: string | null; titulo: string | null; descripcion: string | null; fecha: string | null; asignatura: string | null }[]
   const analisis = analisisRes.data ?? null
+  type InasDetalle = { asignatura: string; horas_efectuadas: number; inasistencias: number; porcentaje: number | null }
+  type AtrasoDetalle = { fecha: string | null; obs: string }
   const asist    = asistRes.data    ?? null
+  const inasDetalle = ((asist as any)?.inasistencias_detalle ?? []) as InasDetalle[]
+  const atrasoDetalle = ((asist as any)?.atrasos_detalle ?? []) as AtrasoDetalle[]
   const fechas   = (fechasRes.data   ?? []) as { titulo: string; fecha_evento: string; asignatura: string | null }[]
 
   const semData   = semaforo(notas)
@@ -60,13 +64,80 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
           <h1 className="text-[20px] font-bold" style={{ color: alumno.color }}>{alumno.nombre.split(' ')[0]}</h1>
           <p className="text-[12px]" style={{ color: '#94a3b8' }}>{alumno.curso} · Saint George{asist?.prof_jefe ? ` · ${asist.prof_jefe}` : ''}</p>
         </div>
-        {asist?.asistencia_pct != null && (
-          <div className="text-right">
-            <p className="text-[18px] font-black" style={{ color: asist.asistencia_pct < 90 ? '#ef4444' : '#0d9488' }}>{asist.asistencia_pct}%</p>
-            <p className="text-[10px]" style={{ color: '#94a3b8' }}>asistencia</p>
-          </div>
-        )}
+        <div className="flex gap-3 text-right">
+          {(asist as any)?.inasistencias != null && (
+            <div>
+              <p className="text-[18px] font-black" style={{ color: (asist as any).inasistencias > 10 ? '#ef4444' : (asist as any).inasistencias > 5 ? '#d97706' : '#0d9488' }}>
+                {(asist as any).inasistencias}h
+              </p>
+              <p className="text-[10px]" style={{ color: '#94a3b8' }}>inas.</p>
+            </div>
+          )}
+          {(asist as any)?.atrasos != null && (
+            <div>
+              <p className="text-[18px] font-black" style={{ color: (asist as any).atrasos > 5 ? '#d97706' : '#64748b' }}>
+                {(asist as any).atrasos}
+              </p>
+              <p className="text-[10px]" style={{ color: '#94a3b8' }}>atrasos</p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* ASISTENCIA POR ASIGNATURA */}
+      {inasDetalle.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#0ea5e9' }} />
+            <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Asistencia por asignatura</h2>
+          </div>
+          <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr style={{ backgroundColor: '#f1f5f9' }}>
+                  <th className="px-3 py-2 text-left font-semibold" style={{ color: '#64748b' }}>Asignatura</th>
+                  <th className="px-2 py-2 text-center font-semibold" style={{ color: '#64748b' }}>Horas</th>
+                  <th className="px-2 py-2 text-center font-semibold" style={{ color: '#ef4444' }}>Inas.</th>
+                  <th className="px-2 py-2 text-center font-semibold" style={{ color: '#64748b' }}>%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inasDetalle
+                  .filter(r => r.inasistencias > 0 || (r.porcentaje != null && r.porcentaje < 100))
+                  .sort((a, b) => (a.porcentaje ?? 100) - (b.porcentaje ?? 100))
+                  .map((r, i) => {
+                    const pct = r.porcentaje ?? 100
+                    const color = pct < 85 ? '#ef4444' : pct < 92 ? '#d97706' : '#0d9488'
+                    return (
+                      <tr key={i} style={{ borderTop: '1px solid #f1f5f9', backgroundColor: i % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                        <td className="px-3 py-2 font-medium" style={{ color: '#475569' }}>{r.asignatura}</td>
+                        <td className="px-2 py-2 text-center" style={{ color: '#94a3b8' }}>{r.horas_efectuadas}</td>
+                        <td className="px-2 py-2 text-center font-bold" style={{ color: r.inasistencias > 0 ? '#ef4444' : '#94a3b8' }}>{r.inasistencias || '—'}</td>
+                        <td className="px-2 py-2 text-center font-bold" style={{ color }}>{pct}%</td>
+                      </tr>
+                    )
+                  })}
+              </tbody>
+            </table>
+            {inasDetalle.every(r => r.inasistencias === 0) && (
+              <p className="px-3 py-3 text-[12px] text-center" style={{ color: '#0d9488' }}>Sin inasistencias registradas</p>
+            )}
+          </div>
+          {atrasoDetalle.length > 0 && (
+            <div className="rounded-xl p-3 space-y-1" style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d' }}>
+              <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#d97706' }}>
+                Atrasos ({atrasoDetalle.length})
+              </p>
+              {atrasoDetalle.map((a, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="material-symbols-outlined" style={{ color: '#d97706', fontSize: 14 }}>schedule</span>
+                  <span className="text-[12px]" style={{ color: '#475569' }}>{a.fecha}{a.obs ? ` — ${a.obs}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ANALISIS IA */}
       {analisis && (

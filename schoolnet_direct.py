@@ -358,15 +358,16 @@ def parse_agenda_json(data, student_index: int) -> list[dict]:
 
 def parse_asistencia_json(data, student_index: int = 0) -> dict:
     """
-    Extracts student photo and teacher info from /asistencia JSON.
-    The endpoint returns: fotosAlumnos (base64 JPEGs), nombProfJefe, modasist, etc.
+    Extracts attendance data from /asistencia JSON.
+    Returns: foto_b64, prof_jefe, inasistencias_total, atrasos_total,
+             inasistencias_detalle (list per subject), atrasos_detalle (list).
     """
     if not data or not isinstance(data, dict):
         return {}
 
     result = {}
 
-    # Extract student photo (base64 JPEG indexed by student position)
+    # Student photo (base64 JPEG indexed by student position)
     fotos = data.get("fotosAlumnos") or []
     if isinstance(fotos, list) and student_index < len(fotos):
         foto_b64 = fotos[student_index]
@@ -380,8 +381,75 @@ def parse_asistencia_json(data, student_index: int = 0) -> dict:
     elif isinstance(prof, str):
         result["prof_jefe"] = prof
 
-    # modasist / modatras (attendance mode indicators — not percentages)
-    result["modasist"] = data.get("modasist")
+    # Totals from encConducta
+    enc = data.get("encConducta") or {}
+    if isinstance(enc, dict):
+        try:
+            result["inasistencias_total"] = int(enc.get("inasistencias") or 0)
+        except (ValueError, TypeError):
+            result["inasistencias_total"] = 0
+        try:
+            result["atrasos_total"] = int(enc.get("atrasos") or 0)
+        except (ValueError, TypeError):
+            result["atrasos_total"] = 0
+
+    # Per-subject attendance breakdown
+    inas_list = data.get("inasistencias") or []
+    detalle = []
+    for item in inas_list:
+        if not isinstance(item, dict):
+            continue
+        asig = (item.get("asig") or "").strip()
+        if not asig:
+            continue
+        hora_efe = 0
+        try:
+            hora_efe = int(item.get("horaEfe") or 0)
+        except (ValueError, TypeError):
+            pass
+
+        # Total absences = sum across periods
+        periodos = item.get("detallePeriodo") or []
+        total_inas = 0
+        pct = None
+        for per in periodos:
+            if not isinstance(per, dict):
+                continue
+            try:
+                total_inas += int(per.get("cantidad") or 0)
+            except (ValueError, TypeError):
+                pass
+            if per.get("porcentaje") is not None and pct is None:
+                try:
+                    pct = float(per.get("porcentaje"))
+                except (ValueError, TypeError):
+                    pass
+
+        # Recalculate percentage if we have both values
+        if hora_efe > 0:
+            pct = round((hora_efe - total_inas) / hora_efe * 100, 1)
+
+        detalle.append({
+            "asignatura": asig,
+            "horas_efectuadas": hora_efe,
+            "inasistencias": total_inas,
+            "porcentaje": pct,
+        })
+
+    result["inasistencias_detalle"] = detalle
+
+    # Tardiness records
+    atrasos_raw = data.get("atrasos") or []
+    atrasos = []
+    for at in atrasos_raw:
+        if not isinstance(at, dict):
+            continue
+        fecha = parse_fecha(at.get("fecha") or "")
+        obs = (at.get("obs") or "").strip()
+        if obs in ("&nbsp;", "\xa0"):
+            obs = ""
+        atrasos.append({"fecha": fecha, "obs": obs})
+    result["atrasos_detalle"] = atrasos
 
     return result
 
@@ -605,6 +673,12 @@ async def main():
                 print(f"[INFO] Asistencia/Fotos...")
                 data = await api_fetch(page, "/asistencia")
                 if data:
+                    # DEBUG: save raw asistencia JSON (minus photos) for inspection
+                    debug_data = {k: v for k, v in data.items() if k != "fotosAlumnos"}
+                    debug_file = OUTPUT_DIR / f"debug_asistencia_alum{idx}.json"
+                    debug_file.write_text(
+                        json.dumps(debug_data, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
                     asist = parse_asistencia_json(data, idx)
                     if asist.get("foto_b64"):
                         alumno["foto_b64"] = asist["foto_b64"]
@@ -612,6 +686,10 @@ async def main():
                     if asist.get("prof_jefe"):
                         alumno["prof_jefe"] = asist["prof_jefe"]
                         print(f"[OK] Prof. Jefe: {asist['prof_jefe']}")
+                    # Add all attendance data to alumno dict
+                    for k, v in asist.items():
+                        if k not in ("foto_b64", "prof_jefe"):
+                            alumno[k] = v
                 else:
                     print("[WARN] Asistencia: sin datos")
             except Exception as e:

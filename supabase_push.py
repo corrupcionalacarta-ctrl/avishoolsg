@@ -193,24 +193,33 @@ def push_grades(data: dict) -> bool:
                 print(f"[OK] {nombre}: {len(rows)} bloques de horario guardados")
 
             # Asistencia / Foto (upsert en tabla asistencia si existe)
-            foto_b64 = alumno.get("foto_b64")
+            foto_b64  = alumno.get("foto_b64")
             prof_jefe = alumno.get("prof_jefe")
-            if foto_b64 or alumno.get("asistencia_pct") is not None:
+            inas_total = alumno.get("inasistencias_total")
+            atraso_total = alumno.get("atrasos_total")
+            inas_detalle = alumno.get("inasistencias_detalle")
+            atrasos_detalle = alumno.get("atrasos_detalle")
+
+            if foto_b64 or prof_jefe or inas_total is not None:
                 try:
                     row: dict = {
                         "alumno": nombre,
                         "actualizado_en": datetime.now().isoformat(),
                     }
-                    if alumno.get("asistencia_pct") is not None:
-                        row["asistencia_pct"] = alumno["asistencia_pct"]
-                        row["inasistencias"] = alumno.get("inasistencias")
-                        row["horas_efectuadas"] = alumno.get("horas_efectuadas")
                     if foto_b64:
                         row["foto_b64"] = foto_b64
                     if prof_jefe:
                         row["prof_jefe"] = prof_jefe
+                    if inas_total is not None:
+                        row["inasistencias"] = inas_total
+                    if atraso_total is not None:
+                        row["atrasos"] = atraso_total
+                    if inas_detalle is not None:
+                        row["inasistencias_detalle"] = inas_detalle
+                    if atrasos_detalle is not None:
+                        row["atrasos_detalle"] = atrasos_detalle
                     sb.table("asistencia").upsert(row, on_conflict="alumno").execute()
-                    print(f"[OK] {nombre}: asistencia/foto guardada")
+                    print(f"[OK] {nombre}: asistencia guardada (inas={inas_total}, atrasos={atraso_total})")
                 except Exception as e:
                     print(f"[WARN] asistencia push: {e} (tabla puede no existir aún)")
 

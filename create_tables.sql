@@ -1,5 +1,13 @@
--- AVI School: tabla analisis_alumno
+-- AVI School: migraciones de tablas
 -- Ejecutar en Supabase → SQL Editor
+
+-- Columnas nuevas en tabla asistencia (si no existen)
+ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS inasistencias        int;
+ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS atrasos              int;
+ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS inasistencias_detalle jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS atrasos_detalle      jsonb DEFAULT '[]'::jsonb;
+
+
 
 CREATE TABLE IF NOT EXISTS analisis_alumno (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
