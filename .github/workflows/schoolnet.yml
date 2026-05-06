@@ -30,6 +30,7 @@ jobs:
           if not exist .venv (
             py -3.12 -m venv .venv
             .venv\Scripts\pip install -r requirements.txt
+            .venv\Scripts\playwright install chromium
           )
 
       - name: Ejecutar pipeline
