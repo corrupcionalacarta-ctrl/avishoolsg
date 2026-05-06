@@ -20,29 +20,40 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from supabase import create_client
 
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip()
-GEMINI_MODEL = (os.getenv("GEMINI_MODEL") or "gemini-2.5-flash").strip()
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR") or ".")
+TELEGRAM_CHAT_ID   = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+GEMINI_API_KEY     = (os.getenv("GEMINI_API_KEY") or "").strip()
+GEMINI_MODEL       = (os.getenv("GEMINI_MODEL") or "gemini-2.5-flash").strip()
+OUTPUT_DIR         = Path(os.getenv("OUTPUT_DIR") or ".")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+_sb = None
+def get_sb():
+    global _sb
+    if _sb is None:
+        url = (os.getenv("SUPABASE_URL") or "").strip()
+        key = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
+        if url and key:
+            _sb = create_client(url, key)
+    return _sb
 
 
 # ===== CONTEXTO DEL COLEGIO =====
 
 def load_latest_digest() -> dict | None:
-    """Carga el digest JSON mas reciente."""
+    """Carga el digest JSON mas reciente (fallback local)."""
     files = sorted(glob.glob(str(OUTPUT_DIR / "digest_*.json")))
     if not files:
         return None
@@ -52,51 +63,159 @@ def load_latest_digest() -> dict | None:
         return None
 
 
-def build_context() -> str:
-    """Arma el contexto escolar para el prompt de Gemini."""
-    digest = load_latest_digest()
-    if not digest:
-        return "No hay informacion escolar disponible todavia."
+def build_context(alumno_filtro: str | None = None) -> str:
+    """
+    Arma el contexto escolar para el prompt de Gemini.
+    Consulta Supabase (notas, anotaciones, agenda, analisis_alumno)
+    y complementa con el digest local como fallback.
+    """
+    hoy   = datetime.now().strftime("%Y-%m-%d")
+    en14  = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+    hace30 = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-    lines = []
-    lines.append(f"=== RESUMEN ESCOLAR (actualizado {datetime.now().strftime('%d/%m %H:%M')}) ===")
-    lines.append(f"Resumen: {digest.get('resumen_ejecutivo', '')}")
+    primer_nombre = alumno_filtro.capitalize() if alumno_filtro else None
+    lines = [f"=== CONTEXTO ESCOLAR AVI SCHOOL ==="]
+    lines.append(f"Fecha: {datetime.now().strftime('%A %d/%m/%Y %H:%M')}")
+    lines.append("Alumnos: Clemente Aravena (11 años, 6°D) y Raimundo Aravena (9 años, 4°A) — Colegio Georgian\n")
 
-    urgentes = digest.get("urgentes", [])
-    if urgentes:
-        lines.append("\n🔴 URGENTE:")
-        for u in urgentes:
-            lines.append(f"  - {u['titulo']}: {u.get('detalle', '')}")
+    sb = get_sb()
 
-    importantes = digest.get("importantes", [])
-    if importantes:
-        lines.append("\n🟡 IMPORTANTE:")
-        for i in importantes:
-            lines.append(f"  - {i['titulo']}: {i.get('detalle', '')}")
+    # --- Supabase: análisis IA ---
+    if sb:
+        try:
+            res = sb.table("analisis_alumno") \
+                .select("alumno, resumen, tendencia_academica, tendencia_conducta, nivel_alerta, prediccion, alertas, recomendaciones, generado_en") \
+                .order("generado_en", desc=True).limit(4).execute()
+            analisis_rows = res.data or []
+            if analisis_rows:
+                lines.append("━━━ ANÁLISIS IA DEL ALUMNO ━━━")
+                visto = set()
+                for a in analisis_rows:
+                    nombre = (a.get("alumno") or "").split()[0]
+                    if nombre in visto:
+                        continue
+                    if primer_nombre and primer_nombre.lower() not in nombre.lower():
+                        continue
+                    visto.add(nombre)
+                    fecha = a.get("generado_en", "")[:10] if a.get("generado_en") else ""
+                    lines.append(f"\n{nombre} (análisis {fecha}):")
+                    lines.append(f"  Tendencia académica: {a.get('tendencia_academica','?')} | Conducta: {a.get('tendencia_conducta','?')} | Alerta: {a.get('nivel_alerta','?')}")
+                    if a.get("resumen"):
+                        lines.append(f"  Resumen: {a['resumen']}")
+                    if a.get("prediccion"):
+                        lines.append(f"  Predicción: {a['prediccion']}")
+                    alertas = a.get("alertas") or []
+                    if alertas:
+                        alerta_strs = [f"[{al.get('prioridad','?').upper()}] {al.get('titulo','')}" for al in alertas]
+                        lines.append(f"  Alertas: {' | '.join(alerta_strs)}")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] analisis_alumno: {e}")
 
-    fechas = digest.get("fechas_proximas", [])
-    if fechas:
-        lines.append("\n📅 PROXIMAS FECHAS:")
-        for f in fechas:
-            lines.append(f"  - {f.get('fecha', '')}: {f.get('evento', '')} ({f.get('asignatura', '')})")
+    # --- Supabase: digest (resumen ejecutivo) ---
+    digest_data = None
+    if sb:
+        try:
+            res = sb.table("digests") \
+                .select("resumen_ejecutivo, json_completo, created_at") \
+                .order("created_at", desc=True).limit(1).execute()
+            digest_data = (res.data or [None])[0]
+        except Exception as e:
+            print(f"[WARN] digests: {e}")
 
-    utiles = digest.get("utiles_mañana", [])
-    if utiles:
-        lines.append("\n🎒 UTILES PARA MAÑANA:")
-        for u in utiles:
-            lines.append(f"  - {u}")
+    # Fallback a archivo local si Supabase no tiene digest
+    if not digest_data:
+        local = load_latest_digest()
+        if local:
+            digest_data = {"resumen_ejecutivo": local.get("resumen_ejecutivo"), "json_completo": local}
 
-    autorizaciones = digest.get("autorizaciones_pendientes", [])
-    if autorizaciones:
-        lines.append("\n📋 AUTORIZACIONES PENDIENTES:")
-        for a in autorizaciones:
-            lines.append(f"  - {a['titulo']} (hasta: {a.get('fecha_limite', '?')})")
+    if digest_data:
+        lines.append("━━━ ÚLTIMO RESUMEN EJECUTIVO ━━━")
+        lines.append(digest_data.get("resumen_ejecutivo") or "")
+        jc = digest_data.get("json_completo") or {}
+        urgentes      = jc.get("urgentes", [])
+        importantes   = jc.get("importantes", [])
+        utiles        = jc.get("utiles_mañana", [])
+        autorizaciones = jc.get("autorizaciones_pendientes", [])
+        if urgentes:
+            lines.append("\n🔴 URGENTE:")
+            for u in urgentes:
+                lines.append(f"  - {u.get('titulo','')}: {u.get('detalle','')}")
+        if importantes:
+            lines.append("\n🟡 IMPORTANTE:")
+            for i in importantes:
+                lines.append(f"  - {i.get('titulo','')}: {i.get('detalle','')}")
+        if utiles:
+            lines.append("\n🎒 LLEVAR MAÑANA: " + ", ".join(utiles))
+        if autorizaciones:
+            lines.append("\n📋 AUTORIZACIONES:")
+            for a in autorizaciones:
+                lines.append(f"  - {a.get('titulo','')} (hasta: {a.get('fecha_limite','?')})")
+        lines.append("")
 
-    informativos = digest.get("informativos", [])
-    if informativos:
-        lines.append(f"\n📌 INFORMATIVOS ({len(informativos)} items):")
-        for inf in informativos[:10]:  # max 10 para no saturar el prompt
-            lines.append(f"  - {inf['titulo']}: {inf.get('detalle', '')}")
+    # --- Supabase: próximas fechas ---
+    if sb:
+        try:
+            q = sb.table("items_colegio") \
+                .select("titulo, asignatura, fecha_evento, alumno") \
+                .eq("categoria", "fecha_proxima") \
+                .gte("fecha_evento", hoy) \
+                .lte("fecha_evento", en14) \
+                .order("fecha_evento") \
+                .execute()
+            fechas = q.data if q.data else []
+            if primer_nombre:
+                fechas = [f for f in fechas if primer_nombre.lower() in (f.get("alumno") or "").lower()]
+            if fechas:
+                lines.append("━━━ PRÓXIMAS FECHAS (14 días) ━━━")
+                for f in fechas:
+                    alum_parts = (f.get("alumno") or "").split()
+                    alum = alum_parts[0] if alum_parts else ""
+                    asig = f"[{f['asignatura']}]" if f.get("asignatura") else ""
+                    lines.append(f"  - {f['fecha_evento']}: {f['titulo']} {asig} ({alum})")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] items_colegio: {e}")
+
+    # --- Supabase: notas ---
+    if sb:
+        try:
+            q = sb.table("notas") \
+                .select("alumno, asignatura, tipo, nota, promedio_curso, descripcion, extraido_en") \
+                .order("extraido_en", desc=True).limit(60).execute()
+            notas = q.data or []
+            if primer_nombre:
+                notas = [n for n in notas if primer_nombre.lower() in (n.get("alumno") or "").lower()]
+            if notas:
+                lines.append("━━━ NOTAS RECIENTES ━━━")
+                for n in notas:
+                    nombre = (n.get("alumno") or "Alumno").split()[0]
+                    vs = f" (prom. curso: {n['promedio_curso']})" if n.get("promedio_curso") else ""
+                    lines.append(f"  - {nombre} | {n.get('asignatura','')}: {n.get('nota','–')}{vs} — {n.get('descripcion') or n.get('tipo','')}")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] notas: {e}")
+
+    # --- Supabase: anotaciones ---
+    if sb:
+        try:
+            q = sb.table("anotaciones") \
+                .select("alumno, fecha, tipo, titulo, descripcion, asignatura") \
+                .gte("fecha", hace30) \
+                .order("fecha", desc=True).limit(30).execute()
+            anots = q.data or []
+            if primer_nombre:
+                anots = [a for a in anots if primer_nombre.lower() in (a.get("alumno") or "").lower()]
+            if anots:
+                lines.append("━━━ ANOTACIONES RECIENTES (30 días) ━━━")
+                for a in anots:
+                    nombre = (a.get("alumno") or "Alumno").split()[0]
+                    tipo   = (a.get("tipo") or "observacion").upper()
+                    texto  = a.get("titulo") or a.get("descripcion") or ""
+                    lines.append(f"  - {nombre} [{tipo}] {a.get('fecha','')}: {texto}")
+                lines.append("")
+        except Exception as e:
+            print(f"[WARN] anotaciones: {e}")
 
     return "\n".join(lines)
 
@@ -129,12 +248,12 @@ COMMAND_RESPONSES = {
 
 # ===== GEMINI =====
 
-def ask_gemini(pregunta: str, historial: list[dict] = None) -> str:
-    """Llama a Gemini con contexto escolar y devuelve la respuesta."""
+def ask_gemini(pregunta: str, historial: list[dict] = None, alumno_filtro: str | None = None) -> str:
+    """Llama a Gemini con contexto escolar completo (Supabase + digest) y devuelve la respuesta."""
     if not GEMINI_API_KEY:
         return "Error: falta GEMINI_API_KEY"
     try:
-        contexto = build_context()
+        contexto = build_context(alumno_filtro)
         ahora = datetime.now().strftime("%A %d/%m/%Y %H:%M")
         system = SYSTEM_PROMPT.format(contexto=contexto, ahora=ahora)
 
@@ -291,27 +410,38 @@ def run_bot():
 
                 print(f"[MSG] {text[:80]}")
 
+                # Detectar si mencionan a un alumno específico
+                text_lower = text.lower()
+                if "clemente" in text_lower:
+                    alumno_filtro = "clemente"
+                elif "raimundo" in text_lower:
+                    alumno_filtro = "raimundo"
+                else:
+                    alumno_filtro = None
+
                 # Comandos slash directos
                 digest = load_latest_digest()
-                if text.startswith("/") and text.split()[0] in COMMAND_RESPONSES or text in ["/hoy", "/urgente", "/fechas", "/utiles", "/start", "/ayuda"]:
-                    if text in ["/start", "/ayuda"]:
-                        resp = (
-                            "👋 <b>AVI School Bot</b>\n\n"
-                            "Comandos:\n"
-                            "/hoy — resumen del dia\n"
-                            "/urgente — tareas urgentes\n"
-                            "/fechas — proximas pruebas y eventos\n"
-                            "/utiles — utiles para mañana\n\n"
-                            "O escribe cualquier pregunta sobre el colegio."
-                        )
-                    else:
-                        resp = handle_command(text.split()[0], digest)
-                        if resp is None:
-                            resp = ask_gemini(text, historial)
+                cmd = text.split()[0] if text.startswith("/") else None
+                if cmd in ["/start", "/ayuda"]:
+                    resp = (
+                        "👋 <b>AVI School Bot</b>\n\n"
+                        "Comandos:\n"
+                        "/hoy — resumen del dia\n"
+                        "/urgente — tareas urgentes\n"
+                        "/fechas — proximas pruebas y eventos\n"
+                        "/utiles — utiles para mañana\n\n"
+                        "O escribe cualquier pregunta:\n"
+                        "• ¿Cómo va Clemente en notas?\n"
+                        "• ¿Tiene Raimundo prueba esta semana?\n"
+                        "• ¿Qué llevo mañana?"
+                    )
+                elif cmd in COMMAND_RESPONSES or cmd in ["/hoy", "/urgente", "/fechas", "/utiles"]:
+                    resp = handle_command(cmd, digest)
+                    if resp is None:
+                        resp = ask_gemini(text, historial, alumno_filtro)
                 else:
-                    # Pregunta libre → RAG con Gemini
-                    resp = ask_gemini(text, historial)
-                    # Guardar en historial
+                    # Pregunta libre → RAG con Gemini + Supabase
+                    resp = ask_gemini(text, historial, alumno_filtro)
                     historial.append({"role": "user", "text": text})
                     historial.append({"role": "model", "text": resp})
                     if len(historial) > 20:
@@ -330,8 +460,16 @@ def run_bot():
 
 if __name__ == "__main__":
     if "--test" in sys.argv:
-        print("Test: preguntando al bot...")
-        resp = ask_gemini("¿Qué tiene AVI mañana en el colegio?")
-        print(f"\nRespuesta:\n{resp}")
+        import io
+        safe_out = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        pregunta = " ".join(sys.argv[2:]) or "Como van las notas de Clemente y Raimundo?"
+        safe_out.write(f"Test: '{pregunta}'\n")
+        safe_out.write("Construyendo contexto desde Supabase...\n")
+        ctx = build_context()
+        safe_out.write(f"Contexto ({len(ctx)} chars):\n{ctx[:1000]}\n...\n\n")
+        safe_out.flush()
+        resp = ask_gemini(pregunta)
+        safe_out.write(f"Respuesta:\n{resp}\n")
+        safe_out.flush()
     else:
         run_bot()
