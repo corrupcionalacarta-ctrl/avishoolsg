@@ -146,7 +146,7 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
 
       {/* ANALISIS IA */}
       {analisis && (
-        <section className="rounded-2xl overflow-hidden" style={{ backgroundColor: alumno.bg, border: `1px solid ${alumno.border}` }}>
+        <section id="ia" className="rounded-2xl overflow-hidden" style={{ backgroundColor: alumno.bg, border: `1px solid ${alumno.border}` }}>
           <div className="px-4 pt-4 pb-2 flex items-center gap-2">
             <span className="material-symbols-outlined" style={{ color: alumno.color, fontSize: 18, fontVariationSettings: "'FILL' 1" }}>psychology</span>
             <p className="text-[13px] font-bold uppercase tracking-widest" style={{ color: alumno.color }}>Análisis IA</p>

@@ -88,7 +88,8 @@ export default async function AlumnosPage() {
         const cond = tendenciaIcon(analisis?.tendencia_conducta ?? null)
 
         return (
-          <Link key={slug} href={`/dashboard/${slug}`}
+          <div key={slug} className="space-y-1.5">
+          <Link href={`/dashboard/${slug}`}
             className="block rounded-2xl overflow-hidden transition-transform active:scale-[0.99]"
             style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.08)', border: `1px solid ${border}` }}>
 
@@ -204,6 +205,24 @@ export default async function AlumnosPage() {
             </div>
 
           </Link>
+
+          {/* Acceso directo IA predictiva */}
+          {analisis && (
+            <Link href={`/alumnos/${slug}#ia`}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl -mt-1"
+              style={{ backgroundColor: color + '0d', border: `1px solid ${border}` }}>
+              <span className="material-symbols-outlined" style={{ color, fontSize: 17, fontVariationSettings: "'FILL' 1" }}>psychology</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] font-semibold" style={{ color }}>Ver Análisis IA predictivo</p>
+                <p className="text-[10px]" style={{ color: '#94a3b8' }}>
+                  {analisis.tendencia_academica === 'mejorando' ? 'Mejorando académicamente' :
+                   analisis.tendencia_academica === 'descendiendo' ? 'Tendencia descendente' : 'Tendencia estable'} · Alerta {analisis.nivel_alerta ?? '?'}
+                </p>
+              </div>
+              <span className="material-symbols-outlined" style={{ color: '#94a3b8', fontSize: 16 }}>chevron_right</span>
+            </Link>
+          )}
+          </div>
         )
       })}
 
