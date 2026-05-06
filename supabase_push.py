@@ -120,9 +120,10 @@ def push_grades(data: dict) -> bool:
             nombre = alumno.get("nombre", "")
             print(f"[INFO] Guardando datos de {nombre}...")
 
-            # Borrar registros de hoy para este alumno (evita duplicados)
-            sb.table("notas").delete().eq("alumno", nombre).gte("extraido_en", f"{hoy}T00:00:00").execute()
-            sb.table("anotaciones").delete().eq("alumno", nombre).gte("extraido_en", f"{hoy}T00:00:00").execute()
+            # Borrar TODOS los registros del alumno antes de re-insertar estado actual
+            # (SchoolNet siempre devuelve el estado completo — no hay historia parcial)
+            sb.table("notas").delete().eq("alumno", nombre).execute()
+            sb.table("anotaciones").delete().eq("alumno", nombre).execute()
 
             # Notas
             notas = alumno.get("notas", [])
