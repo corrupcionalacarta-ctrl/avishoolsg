@@ -630,15 +630,14 @@ async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = T
             # Extraer archivos adjuntos de cada item (navegando dentro)
             all_materiales = []
             if deep and all_items:
-                # Priorizar: materiales del profe primero, luego tareas pendientes
-                sorted_items = (
-                    [i for i in all_items if i.get("tipo") == "material"] +
-                    [i for i in all_items if i.get("tipo") != "material" and i.get("estado") in ("pendiente", "atrasado")] +
-                    [i for i in all_items if i.get("tipo") != "material" and i.get("estado") not in ("pendiente", "atrasado")]
-                )
-                items_for_materials = sorted_items[:30]
+                # Materiales del profe (/r/): TODOS sin límite
+                # Tareas: solo las pendientes/atrasadas (hasta 15)
+                items_material = [i for i in all_items if i.get("tipo") == "material"]
+                items_tareas   = [i for i in all_items if i.get("tipo") == "tarea"
+                                  and i.get("estado") in ("pendiente", "atrasado")][:15]
+                items_for_materials = items_material + items_tareas
 
-                print(f"[INFO] Extrayendo materiales de {len(items_for_materials)} tareas...")
+                print(f"[INFO] Extrayendo archivos de {len(items_material)} materiales + {len(items_tareas)} tareas pendientes...")
                 for item in items_for_materials:
                     mats = await get_assignment_materials(page, item)
                     for m in mats:
