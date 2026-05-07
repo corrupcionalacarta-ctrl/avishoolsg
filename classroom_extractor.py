@@ -210,46 +210,49 @@ async def get_courses(page: Page) -> list[dict]:
     return courses
 
 
-async def get_course_assignments(page: Page, course: dict) -> list[dict]:
+async def get_course_items(page: Page, course: dict) -> list[dict]:
     """
-    Navega al tab 'Trabajo de clase' del curso y extrae todas las tareas.
+    Navega al tab 'Trabajo de clase' del curso y extrae tareas Y materiales.
+    - Tareas: /c/.../a/... (el alumno entrega algo)
+    - Materiales: /c/.../r/... (el profe sube recursos para estudiar, sin entrega)
+    - Preguntas: /c/.../p/...
     Retorna lista de dicts con: titulo, tipo, fecha_entrega, estado, calificacion, link
     """
     classwork_url = f"https://classroom.google.com/c/{course['id']}/t/all"
     await page.goto(classwork_url, wait_until="domcontentloaded", timeout=30000)
     await asyncio.sleep(4)
 
-    # Esperar que carguen las tareas
     try:
         await page.wait_for_selector(
             "li[class], [role='listitem'], .pHZ6Fd, .kpGEdb",
             timeout=10000
         )
     except Exception:
-        # Intentar igual
         await asyncio.sleep(2)
 
-    assignments = await page.evaluate("""() => {
+    items = await page.evaluate("""() => {
         const result = [];
         const seen = new Set();
 
-        // Google Classroom assignments en el tab de Trabajo de clase
-        // Buscar todos los items que tengan link a una tarea /a/ o /p/ (pregunta)
-        const taskLinks = [...document.querySelectorAll('a[href*="/c/"][href*="/a/"], a[href*="/c/"][href*="/p/"]')];
+        // Capturar tareas (/a/), materiales (/r/) y preguntas (/p/)
+        const allLinks = [...document.querySelectorAll(
+            'a[href*="/c/"][href*="/a/"], a[href*="/c/"][href*="/r/"], a[href*="/c/"][href*="/p/"]'
+        )];
 
-        for (const link of taskLinks) {
+        for (const link of allLinks) {
             const href = link.href || '';
             if (seen.has(href)) continue;
             seen.add(href);
 
-            // Extraer tipo de la URL
-            const tipo = href.includes('/a/') ? 'tarea' :
-                        href.includes('/p/') ? 'pregunta' : 'tarea';
+            // Tipo según segmento de URL
+            let tipo = 'tarea';
+            if (href.includes('/r/')) tipo = 'material';
+            else if (href.includes('/p/')) tipo = 'pregunta';
 
-            // El contenedor del item
+            // Contenedor del item
             const item = link.closest('li, [role="listitem"], [jscontroller]') || link.parentElement;
 
-            // Título: texto del link o heading dentro del item
+            // Título
             let titulo = link.getAttribute('aria-label') || '';
             if (!titulo) {
                 const h = item ? item.querySelector('p, span, h3, h4, [class*="title"]') : null;
@@ -258,12 +261,11 @@ async def get_course_assignments(page: Page, course: dict) -> list[dict]:
             titulo = titulo.replace(/\\s+/g, ' ').trim();
             if (!titulo || titulo.length < 2) continue;
 
-            // Fecha de entrega: buscar texto con patrón de fecha
+            // Fecha (solo relevante para tareas)
             let fechaTexto = '';
-            if (item) {
+            if (tipo === 'tarea' && item) {
                 const allText = [...item.querySelectorAll('span, p, div')].map(e => e.textContent.trim());
                 for (const t of allText) {
-                    // Patrones comunes: "Fecha de entrega: X", "Vence el...", "entrega hoy", fechas
                     if (/\\d+.*\\d+|hoy|mañana|vence/i.test(t) && t.length < 80) {
                         fechaTexto = t;
                         break;
@@ -271,52 +273,41 @@ async def get_course_assignments(page: Page, course: dict) -> list[dict]:
                 }
             }
 
-            // Estado: buscar texto de estado
-            let estado = 'pendiente';
-            if (item) {
+            // Estado (solo para tareas)
+            let estado = tipo === 'material' ? 'informativo' : 'pendiente';
+            if (tipo === 'tarea' && item) {
                 const itemText = item.textContent.toLowerCase();
-                if (itemText.includes('entregado') || itemText.includes('turned in') || itemText.includes('submitted')) {
-                    estado = 'entregado';
-                } else if (itemText.includes('calificado') || itemText.includes('graded')) {
-                    estado = 'calificado';
-                } else if (itemText.includes('devuelto') || itemText.includes('returned')) {
-                    estado = 'devuelto';
-                } else if (itemText.includes('atrasado') || itemText.includes('late') || itemText.includes('vencido')) {
-                    estado = 'atrasado';
-                }
+                if (itemText.includes('entregado') || itemText.includes('turned in')) estado = 'entregado';
+                else if (itemText.includes('calificado') || itemText.includes('graded')) estado = 'calificado';
+                else if (itemText.includes('devuelto') || itemText.includes('returned')) estado = 'devuelto';
+                else if (itemText.includes('atrasado') || itemText.includes('late')) estado = 'atrasado';
             }
 
-            // Calificación: buscar texto tipo "7/7" o "85/100"
+            // Calificación
             let calificacion = null;
-            if (item) {
+            if (tipo === 'tarea' && item) {
                 const gradePat = item.textContent.match(/(\\d+(?:[,.]\\d+)?)\\s*\\/\\s*(\\d+)/);
-                if (gradePat) {
-                    calificacion = gradePat[0];
-                }
+                if (gradePat) calificacion = gradePat[0];
             }
 
-            result.push({
-                titulo,
-                tipo,
-                fecha_texto: fechaTexto,
-                estado,
-                calificacion,
-                link: href,
-            });
+            result.push({ titulo, tipo, fecha_texto: fechaTexto, estado, calificacion, link: href });
         }
 
         return result;
     }""")
 
-    print(f"     [{course['nombre']}] {len(assignments)} tareas")
-    return assignments
+    tareas   = [i for i in items if i["tipo"] == "tarea"]
+    materiales = [i for i in items if i["tipo"] == "material"]
+    print(f"     [{course['nombre']}] {len(tareas)} tareas, {len(materiales)} materiales")
+    return items
 
 
 async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
     """
-    Navega a la página de detalle de una tarea y extrae los archivos adjuntos.
+    Navega a la página de detalle de una tarea o material y extrae los archivos adjuntos.
+    Funciona con tareas (/a/), materiales (/r/) y preguntas (/p/).
     Retorna: [{nombre, url, tipo}]
-    Solo se llaman links a Google Drive/Docs/PDFs/YouTube — no links de navegación.
+    Solo captura links a Google Drive/Docs/PDFs/YouTube — no links de navegación.
     """
     link = assignment.get("link", "")
     if not link or "/c/" not in link:
@@ -623,27 +614,29 @@ async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = T
                 print(f"[WARN] No se encontraron cursos para {alumno['nombre']}")
                 return [], []
 
-            # Extraer tareas de cada curso
+            # Extraer tareas Y materiales de cada curso
             all_items = []
             for course in courses:
-                assignments = await get_course_assignments(page, course)
-                for a in assignments:
+                items = await get_course_items(page, course)
+                for a in items:
                     a["curso"] = course["nombre"]
                     a["fecha_entrega"] = parse_fecha_classroom(a.pop("fecha_texto", ""))
-                all_items.extend(assignments)
+                all_items.extend(items)
 
-            print(f"\n[RESUMEN] {alumno['nombre']}: {len(all_items)} tareas en {len(courses)} cursos")
+            n_tareas = sum(1 for i in all_items if i["tipo"] == "tarea")
+            n_mats   = sum(1 for i in all_items if i["tipo"] == "material")
+            print(f"\n[RESUMEN] {alumno['nombre']}: {n_tareas} tareas + {n_mats} materiales en {len(courses)} cursos")
 
-            # Extraer materiales adjuntos (navegando dentro de cada tarea)
+            # Extraer archivos adjuntos de cada item (navegando dentro)
             all_materiales = []
             if deep and all_items:
-                # Limitar a 25 tareas para no tardar demasiado
-                # Priorizar: pendientes primero, luego el resto
+                # Priorizar: materiales del profe primero, luego tareas pendientes
                 sorted_items = (
-                    [i for i in all_items if i.get("estado") in ("pendiente", "atrasado")] +
-                    [i for i in all_items if i.get("estado") not in ("pendiente", "atrasado")]
+                    [i for i in all_items if i.get("tipo") == "material"] +
+                    [i for i in all_items if i.get("tipo") != "material" and i.get("estado") in ("pendiente", "atrasado")] +
+                    [i for i in all_items if i.get("tipo") != "material" and i.get("estado") not in ("pendiente", "atrasado")]
                 )
-                items_for_materials = sorted_items[:25]
+                items_for_materials = sorted_items[:30]
 
                 print(f"[INFO] Extrayendo materiales de {len(items_for_materials)} tareas...")
                 for item in items_for_materials:

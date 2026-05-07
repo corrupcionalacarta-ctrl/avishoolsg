@@ -51,12 +51,23 @@ export default async function EstudiarPage() {
   const materiales = (res.data ?? []) as Material[]
 
   // Agrupar: alumno → curso → lista de materiales
+  // Ordenar: materiales del profe primero (tarea_titulo vacío o "Material"), luego los de tareas
   const byAlumno: Record<string, Record<string, Material[]>> = {}
   for (const m of materiales) {
     const nombre = m.alumno?.split(' ')[0] ?? 'Alumno'
     if (!byAlumno[nombre]) byAlumno[nombre] = {}
     if (!byAlumno[nombre][m.curso]) byAlumno[nombre][m.curso] = []
     byAlumno[nombre][m.curso].push(m)
+  }
+  // Ordenar materiales dentro de cada curso: sin tarea (publicados como Material) primero
+  for (const alumnoCursos of Object.values(byAlumno)) {
+    for (const curso of Object.keys(alumnoCursos)) {
+      alumnoCursos[curso].sort((a, b) => {
+        const aEsMaterial = !a.tarea_titulo || a.tarea_titulo === 'Material'
+        const bEsMaterial = !b.tarea_titulo || b.tarea_titulo === 'Material'
+        return (aEsMaterial ? 0 : 1) - (bEsMaterial ? 0 : 1)
+      })
+    }
   }
 
   return (
@@ -109,6 +120,7 @@ export default async function EstudiarPage() {
                     const tipo = m.tipo ?? 'archivo'
                     const icon = TIPO_ICON[tipo] ?? 'attach_file'
                     const iconColor = TIPO_COLOR[tipo] ?? '#64748b'
+                    const esMatProfe = !m.tarea_titulo || m.tarea_titulo === 'Material'
 
                     return (
                       <a key={i} href={m.url} target="_blank" rel="noopener noreferrer"
@@ -120,7 +132,14 @@ export default async function EstudiarPage() {
                         </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-[13px] font-medium truncate" style={{ color: '#1e293b' }}>{m.nombre}</p>
-                          <p className="text-[10px] truncate" style={{ color: '#94a3b8' }}>{m.tarea_titulo}</p>
+                          {!esMatProfe && m.tarea_titulo && (
+                            <p className="text-[10px] truncate" style={{ color: '#94a3b8' }}>
+                              Tarea: {m.tarea_titulo}
+                            </p>
+                          )}
+                          {esMatProfe && (
+                            <p className="text-[10px] font-semibold" style={{ color: '#059669' }}>Material del profe</p>
+                          )}
                         </div>
                         <span className="material-symbols-outlined flex-shrink-0" style={{ color: '#cbd5e1', fontSize: 16 }}>open_in_new</span>
                       </a>
