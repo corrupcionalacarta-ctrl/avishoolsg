@@ -37,12 +37,13 @@ export default async function DashboardPage() {
   const en7 = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]
   const hace30 = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0]
 
-  const [digestRes, fechasRes, notasRes, anotRes, analisisRes] = await Promise.all([
+  const [digestRes, fechasRes, notasRes, anotRes, analisisRes, accionesRes] = await Promise.all([
     supabase.from('digests').select('resumen_ejecutivo, created_at, json_completo').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('items_colegio').select('titulo, fecha_evento, asignatura, alumno, detalle').eq('categoria', 'fecha_proxima').gte('fecha_evento', hoy).order('fecha_evento').limit(30),
     supabase.from('notas').select('alumno, asignatura, nota, promedio_curso, fecha').order('extraido_en', { ascending: false }).limit(60),
     supabase.from('anotaciones').select('alumno, tipo, titulo, descripcion, fecha').gte('fecha', hace30).order('fecha', { ascending: false }),
     supabase.from('analisis_alumno').select('alumno, tendencia_academica, nivel_alerta').order('generado_en', { ascending: false }).limit(4),
+    supabase.from('acciones_log').select('item_titulo, porcentaje').gte('created_at', hace30),
   ])
 
   const allNotas   = (notasRes.data  ?? []) as NotaRow[]
@@ -51,9 +52,18 @@ export default async function DashboardPage() {
   const analisisAll  = (analisisRes.data ?? []) as AnalisisRow[]
   const digest = digestRes.data
 
+  // Títulos de acciones ya completadas (porcentaje >= 75) para filtrarlas del dashboard
+  const accionesCompletadas = new Set(
+    ((accionesRes.data ?? []) as { item_titulo: string; porcentaje: number }[])
+      .filter(a => (a.porcentaje ?? 100) >= 75)
+      .map(a => a.item_titulo.trim().toLowerCase())
+  )
+
   const json            = (digest?.json_completo ?? {}) as Record<string, unknown>
-  const urgentes        = (json.urgentes                  as UrgItem[]      ?? [])
-  const importantes     = (json.importantes               as ImpItem[]      ?? [])
+  const urgentes        = ((json.urgentes as UrgItem[] ?? [])
+    .filter(u => !accionesCompletadas.has(u.titulo.trim().toLowerCase())))
+  const importantes     = ((json.importantes as ImpItem[] ?? [])
+    .filter(u => !accionesCompletadas.has(u.titulo.trim().toLowerCase())))
   const utiles          = (json.utiles_mañana             as string[]       ?? [])
   const autorizaciones  = (json.autorizaciones_pendientes as AutorizItem[]  ?? [])
   const colacion        = (json.colacion_especial         as string | undefined)
@@ -136,6 +146,28 @@ export default async function DashboardPage() {
         </div>
       )}
 
+      {/* LLEVAR MAÑANA — standalone card, visible de inmediato */}
+      {utiles.length > 0 && (
+        <section className="rounded-2xl overflow-hidden"
+          style={{ backgroundColor: '#f0fdf4', border: '2px solid #86efac', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+          <div className="px-4 pt-4 pb-1 flex items-center gap-2">
+            <span className="material-symbols-outlined" style={{ color: '#16a34a', fontSize: 20 }}>shopping_bag</span>
+            <h2 className="text-[15px] font-bold" style={{ color: '#15803d' }}>Llevar / Comprar mañana</h2>
+          </div>
+          <div className="px-4 pb-4 pt-2 space-y-2">
+            {utiles.map((u, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: '#bbf7d0' }}>
+                  <span className="material-symbols-outlined" style={{ color: '#16a34a', fontSize: 14 }}>check</span>
+                </span>
+                <span className="text-[14px] font-medium" style={{ color: '#1e293b' }}>{u}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* EN RIESGO ESTA SEMANA */}
       {riesgos.length > 0 && (
         <section className="space-y-2">
@@ -185,17 +217,6 @@ export default async function DashboardPage() {
             <div className="px-4 pb-3 flex items-center gap-2">
               <span className="material-symbols-outlined" style={{ color: '#7c3aed', fontSize: 16 }}>restaurant</span>
               <span className="text-[12px]" style={{ color: '#7c3aed' }}><b>Colación:</b> {colacion}</span>
-            </div>
-          )}
-          {utiles.length > 0 && (
-            <div className="px-4 pb-4 pt-1 space-y-1 border-t" style={{ borderColor: '#f8fafc' }}>
-              <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#94a3b8' }}>Llevar mañana</p>
-              {utiles.map((u, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="material-symbols-outlined" style={{ color: '#0d9488', fontSize: 16 }}>backpack</span>
-                  <span className="text-[13px]" style={{ color: '#1e293b' }}>{u}</span>
-                </div>
-              ))}
             </div>
           )}
         </section>

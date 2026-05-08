@@ -59,24 +59,55 @@ for i in (1, 2):
 # Playwright helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def find_chrome_executable() -> str | None:
+    """Busca Chrome instalado en el sistema (Windows)."""
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 async def get_context(playwright, alumno: dict, force_visible: bool = False) -> BrowserContext:
-    """Devuelve contexto con sesión persistente para el alumno."""
+    """Devuelve contexto con sesión persistente para el alumno.
+    Usa Chrome real del sistema si está disponible (mejor compatibilidad con Classroom).
+    """
     session_dir = alumno["session_dir"]
     session_dir.mkdir(parents=True, exist_ok=True)
 
     headless = HEADLESS and not force_visible
-    ctx = await playwright.chromium.launch_persistent_context(
-        str(session_dir),
+
+    chrome_exe = find_chrome_executable()
+    kwargs = dict(
         headless=headless,
-        args=["--disable-blink-features=AutomationControlled"],
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         ),
         viewport={"width": 1280, "height": 900},
         locale="es-CL",
+        ignore_default_args=["--enable-automation"],
+        # Bloquear service workers para que las peticiones de red no sean servidas
+        # desde caché de SW — así capturamos dpT4Vd (coursework items) siempre.
+        service_workers="block",
     )
+    if chrome_exe:
+        print(f"[INFO] Usando Chrome del sistema: {chrome_exe}")
+        kwargs["executable_path"] = chrome_exe
+    else:
+        print("[WARN] Chrome no encontrado, usando Chromium de Playwright")
+
+    ctx = await playwright.chromium.launch_persistent_context(str(session_dir), **kwargs)
     return ctx
 
 
@@ -212,93 +243,261 @@ async def get_courses(page: Page) -> list[dict]:
 
 async def get_course_items(page: Page, course: dict) -> list[dict]:
     """
-    Navega al tab 'Trabajo de clase' del curso y extrae tareas Y materiales.
-    - Tareas: /c/.../a/... (el alumno entrega algo)
-    - Materiales: /c/.../r/... (el profe sube recursos para estudiar, sin entrega)
-    - Preguntas: /c/.../p/...
-    Retorna lista de dicts con: titulo, tipo, fecha_entrega, estado, calificacion, link
+    Extrae tareas y materiales de un curso de Classroom.
+    Estrategia 1: DOM scraping de [data-stream-item-id] (los ítems usan click handlers, no <a href>).
+    Estrategia 2: Parseo de batchexecute dpT4Vd (hrcw.qr) como respaldo.
     """
-    classwork_url = f"https://classroom.google.com/c/{course['id']}/t/all"
-    await page.goto(classwork_url, wait_until="domcontentloaded", timeout=30000)
-    await asyncio.sleep(4)
+    course_id = course["id"]
+    all_batch: list[dict] = []
+
+    # Evento para saber cuándo llega dpT4Vd (la respuesta con los ítems de classwork)
+    dpT4Vd_received = asyncio.Event()
+
+    async def handle_response(response):
+        if "batchexecute" in response.url:
+            try:
+                text = await response.text()
+                rpcids = response.url.split("rpcids=")[1].split("&")[0] if "rpcids=" in response.url else ""
+                all_batch.append({"rpcids": rpcids, "body": text, "body_len": len(text)})
+                if rpcids == "dpT4Vd" and len(text) > 200:
+                    dpT4Vd_received.set()
+            except Exception:
+                pass
+
+    page.on("response", handle_response)
 
     try:
-        await page.wait_for_selector(
-            "li[class], [role='listitem'], .pHZ6Fd, .kpGEdb",
-            timeout=10000
-        )
+        await page.goto(f"https://classroom.google.com/c/{course_id}/t/all",
+                        wait_until="load", timeout=40000)
     except Exception:
-        await asyncio.sleep(2)
+        await page.goto(f"https://classroom.google.com/c/{course_id}/t/all",
+                        wait_until="domcontentloaded", timeout=40000)
 
+    # Traer la ventana al frente para activar Page Visibility API
+    try:
+        await page.bring_to_front()
+    except Exception:
+        pass
+
+    # Esperar que la SPA inicialice el JavaScript del classwork tab
+    await asyncio.sleep(5)
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await asyncio.sleep(2)
+    await page.evaluate("window.scrollTo(0, 0)")
+    await asyncio.sleep(1)
+
+    # Si dpT4Vd no llegó todavía, navegar al stream del curso también
+    # (el stream dispara dpT4Vd con los items recientes del alumno)
+    if not dpT4Vd_received.is_set():
+        try:
+            await page.goto(f"https://classroom.google.com/c/{course_id}",
+                            wait_until="load", timeout=30000)
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await asyncio.sleep(2)
+        await page.evaluate("window.scrollTo(0, 0)")
+        await asyncio.sleep(1)
+
+    # Esperar a que llegue dpT4Vd (hasta 10 segundos más)
+    try:
+        await asyncio.wait_for(dpT4Vd_received.wait(), timeout=10.0)
+        print(f"     [DEBUG] dpT4Vd recibido ✓")
+        await asyncio.sleep(1.5)  # Esperar que JS renderice los ítems
+    except asyncio.TimeoutError:
+        print(f"     [DEBUG] dpT4Vd no llegó")
+
+    # Debug: cuántas llamadas batchexecute se capturaron
+    rpc_list = [c["rpcids"] for c in all_batch]
+    print(f"     [DEBUG] {len(all_batch)} batchexecute: {rpc_list}")
+
+    # Debug: contar ítems en DOM
+    cnt = await page.evaluate("document.querySelectorAll('[data-stream-item-id]').length")
+    print(f"     [DEBUG] items en DOM: {cnt}")
+
+    page.remove_listener("response", handle_response)
+
+    # ── Estrategia 1: DOM con data-stream-item-id ──────────────────────────────
+    # Google Classroom usa data-stream-item-id en los contenedores de posts.
+    # Los posts del profe (materiales/recursos) contienen links inline a Drive/Docs.
+    # Los extraemos directamente del DOM del stream, sin navegar a páginas de detalle.
     items = await page.evaluate("""() => {
         const result = [];
         const seen = new Set();
+        const seenLinks = new Set();
+        const courseId = location.pathname.split('/')[2];
 
-        // Capturar tareas (/a/), materiales (/r/) y preguntas (/p/)
-        const allLinks = [...document.querySelectorAll(
-            'a[href*="/c/"][href*="/a/"], a[href*="/c/"][href*="/r/"], a[href*="/c/"][href*="/p/"]'
-        )];
+        const CONTENT_DOMAINS = [
+            'drive.google.com', 'docs.google.com', 'slides.google.com',
+            'forms.google.com', 'youtube.com/watch', 'youtu.be/',
+            'sites.google.com'
+        ];
 
-        for (const link of allLinks) {
-            const href = link.href || '';
-            if (seen.has(href)) continue;
-            seen.add(href);
+        function resolveClassroomUrl(href) {
+            // Desempaquetar google.com/url?q=... redirect
+            try {
+                if (href.includes('google.com/url')) {
+                    const u = new URL(href);
+                    const q = u.searchParams.get('q') || u.searchParams.get('url');
+                    if (q) return q;
+                }
+            } catch(e) {}
+            return href;
+        }
 
-            // Tipo según segmento de URL
-            let tipo = 'tarea';
-            if (href.includes('/r/')) tipo = 'material';
-            else if (href.includes('/p/')) tipo = 'pregunta';
+        function extractMaterials(div) {
+            const mats = [];
+            const links = [...div.querySelectorAll('a[href]')];
+            for (const a of links) {
+                const rawHref = a.href || '';
+                const href = resolveClassroomUrl(rawHref);
+                const isContent = CONTENT_DOMAINS.some(d => href.includes(d)) ||
+                                  /\\.pdf([?#]|$)/.test(href);
+                if (!isContent || seenLinks.has(href)) continue;
+                seenLinks.add(href);
 
-            // Contenedor del item
-            const item = link.closest('li, [role="listitem"], [jscontroller]') || link.parentElement;
+                let tipo = 'archivo';
+                if (href.includes('docs.google.com/document')) tipo = 'documento';
+                else if (href.includes('docs.google.com/presentation') || href.includes('slides.google.com')) tipo = 'presentacion';
+                else if (href.includes('docs.google.com/spreadsheets')) tipo = 'hoja';
+                else if (href.includes('docs.google.com/forms') || href.includes('forms.google.com')) tipo = 'formulario';
+                else if (href.includes('youtube.com') || href.includes('youtu.be')) tipo = 'video';
+                else if (href.includes('sites.google.com')) tipo = 'sitio';
+                else if (href.includes('drive.google.com')) tipo = 'drive';
+                else if (/\\.pdf/.test(href)) tipo = 'pdf';
 
-            // Título
-            let titulo = link.getAttribute('aria-label') || '';
-            if (!titulo) {
-                const h = item ? item.querySelector('p, span, h3, h4, [class*="title"]') : null;
-                titulo = h ? h.textContent.trim() : link.textContent.trim();
-            }
-            titulo = titulo.replace(/\\s+/g, ' ').trim();
-            if (!titulo || titulo.length < 2) continue;
-
-            // Fecha (solo relevante para tareas)
-            let fechaTexto = '';
-            if (tipo === 'tarea' && item) {
-                const allText = [...item.querySelectorAll('span, p, div')].map(e => e.textContent.trim());
-                for (const t of allText) {
-                    if (/\\d+.*\\d+|hoy|mañana|vence/i.test(t) && t.length < 80) {
-                        fechaTexto = t;
-                        break;
+                const container = a.closest('[aria-label], [data-tooltip]') || a;
+                let nombre = (
+                    container.getAttribute('aria-label') ||
+                    container.getAttribute('data-tooltip') ||
+                    a.getAttribute('aria-label') ||
+                    a.getAttribute('title') ||
+                    a.textContent
+                ).replace(/\\s+/g, ' ').trim();
+                nombre = nombre
+                    .replace(/^(abrir|open|ver|view)\\s+/i, '')
+                    .replace(/^Archivo adjunto:\\s*/i, '')
+                    .replace(/^Adjunto:\\s*/i, '')
+                    .trim();
+                if (!nombre || nombre.length < 2 || nombre.length > 200) {
+                    // Fallback: usar tipo + ID de Drive para identificar el archivo
+                    const driveMatch = href.match(/[/]d[/]([A-Za-z0-9_-]{10,})[/]/);
+                    if (driveMatch) {
+                        nombre = `Archivo Drive (${driveMatch[1].substring(0, 8)}...)`;
+                    } else {
+                        nombre = href.split('/').filter(s => s.length > 8 && !['view','edit','preview'].includes(s)).pop()?.split('?')[0] || 'Archivo';
                     }
                 }
-            }
 
-            // Estado (solo para tareas)
-            let estado = tipo === 'material' ? 'informativo' : 'pendiente';
-            if (tipo === 'tarea' && item) {
-                const itemText = item.textContent.toLowerCase();
-                if (itemText.includes('entregado') || itemText.includes('turned in')) estado = 'entregado';
-                else if (itemText.includes('calificado') || itemText.includes('graded')) estado = 'calificado';
-                else if (itemText.includes('devuelto') || itemText.includes('returned')) estado = 'devuelto';
-                else if (itemText.includes('atrasado') || itemText.includes('late')) estado = 'atrasado';
+                mats.push({ url: href, tipo, nombre });
             }
+            return mats;
+        }
+
+        const itemDivs = [...document.querySelectorAll('[data-stream-item-id]')];
+        for (const div of itemDivs) {
+            const itemId = div.getAttribute('data-stream-item-id');
+            if (!itemId || seen.has(itemId)) continue;
+            seen.add(itemId);
+
+            // Título: buscar heading o texto principal del ítem
+            let titulo = '';
+            const heading = div.querySelector('[jsname="rQC7Ie"], [class*="VOnTrc"], [class*="title"]');
+            if (heading) titulo = heading.textContent.trim();
+            if (!titulo) titulo = div.querySelector('h1,h2,h3')?.textContent.trim() || '';
+            if (!titulo) titulo = div.textContent.replace(/\\s+/g, ' ').trim().substring(0, 120);
+            if (!titulo || titulo.length < 2) continue;
+
+            const innerHtml = div.innerHTML.toLowerCase();
+            const text = div.textContent.toLowerCase();
+
+            // Tipo
+            let tipo = 'tarea';
+            if (innerHtml.includes('material') && !innerHtml.includes('entregado')) tipo = 'material';
+
+            // Estado
+            let estado = tipo === 'material' ? 'informativo' : 'pendiente';
+            if (text.includes('entregado') || text.includes('submitted')) estado = 'entregado';
+            else if (text.includes('calificado') || text.includes('graded')) estado = 'calificado';
+            else if (text.includes('atrasado') || text.includes('missing') || text.includes('late')) estado = 'atrasado';
+
+            // Fecha
+            let fecha_texto = '';
+            const fechaEl = div.querySelector('[class*="due"], [class*="fecha"], time');
+            if (fechaEl) fecha_texto = (fechaEl.getAttribute('datetime') || fechaEl.textContent).trim();
 
             // Calificación
             let calificacion = null;
-            if (tipo === 'tarea' && item) {
-                const gradePat = item.textContent.match(/(\\d+(?:[,.]\\d+)?)\\s*\\/\\s*(\\d+)/);
-                if (gradePat) calificacion = gradePat[0];
+            const calEl = div.querySelector('[class*="grade"], [class*="nota"], [class*="NwH0nc"]');
+            if (calEl) {
+                const calText = calEl.textContent.trim();
+                if (calText && /\\d/.test(calText)) calificacion = calText;
             }
 
-            result.push({ titulo, tipo, fecha_texto: fechaTexto, estado, calificacion, link: href });
-        }
+            // Materiales inline (Drive/Docs links dentro del stream post)
+            const materiales_inline = extractMaterials(div);
 
+            const link = `https://classroom.google.com/c/${courseId}/a/${itemId}/details`;
+            result.push({ titulo, tipo, fecha_texto, estado, calificacion, link, materiales_inline });
+        }
         return result;
     }""")
 
-    tareas   = [i for i in items if i["tipo"] == "tarea"]
+    # ── Estrategia 2: Parseo de batchexecute dpT4Vd ───────────────────────────
+    if not items:
+        items = _parse_batch_items(all_batch, course_id)
+
+    tareas    = [i for i in items if i["tipo"] == "tarea"]
     materiales = [i for i in items if i["tipo"] == "material"]
-    print(f"     [{course['nombre']}] {len(tareas)} tareas, {len(materiales)} materiales")
+    n_inline = sum(len(i.get("materiales_inline", [])) for i in items)
+    print(f"     [{course['nombre']}] {len(tareas)} tareas, {len(materiales)} materiales ({n_inline} archivos inline)")
+    return items
+
+
+def _parse_batch_items(all_batch: list[dict], course_id: str) -> list[dict]:
+    """
+    Parsea respuestas dpT4Vd (hrcw.qr) de batchexecute para extraer coursework items.
+    Úsado como fallback si el DOM no tiene data-stream-item-id.
+    """
+    items = []
+    seen: set[str] = set()
+
+    for call in all_batch:
+        if call["rpcids"] != "dpT4Vd" or call["body_len"] < 200:
+            continue
+        body = call["body"]
+        try:
+            # El cuerpo tiene formato: )]}'\n\nSIZE\n[[JSON]]\n25\n[[TAIL]]\n
+            stripped = re.sub(r"^\)\]\}'\s*", "", body).lstrip()
+            m = re.search(r"\d+\n(\[.*?\])\n\d+\n", stripped, re.DOTALL)
+            if not m:
+                continue
+            outer = json.loads(m.group(1))
+            inner = json.loads(outer[0][2])
+            # inner = ["hrcw.qr", [false], [[wrapper1], [wrapper2], ...]]
+            if not inner or len(inner) < 3:
+                continue
+            for wrapper in inner[2]:
+                if not wrapper or len(wrapper) < 6 or not wrapper[5]:
+                    continue
+                item_data = wrapper[5][0] if wrapper[5] else None
+                if not item_data or len(item_data) < 6:
+                    continue
+                item_id = str(item_data[0][0]) if item_data[0] else None
+                title   = item_data[5] if len(item_data) > 5 and isinstance(item_data[5], str) else None
+                if not title or not item_id or item_id in seen:
+                    continue
+                seen.add(item_id)
+                # Estado: item_data[8] → 2=entregado, 1=pendiente
+                state_num = item_data[8] if len(item_data) > 8 else None
+                estado = "entregado" if state_num == 2 else "pendiente"
+                link = f"https://classroom.google.com/c/{course_id}/a/{item_id}/details"
+                items.append({"titulo": title, "tipo": "tarea",
+                               "fecha_texto": "", "estado": estado,
+                               "calificacion": None, "link": link})
+        except Exception:
+            continue
     return items
 
 
@@ -308,19 +507,44 @@ async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
     Funciona con tareas (/a/), materiales (/r/) y preguntas (/p/).
     Retorna: [{nombre, url, tipo}]
     Solo captura links a Google Drive/Docs/PDFs/YouTube — no links de navegación.
+    Intenta ambos paths /a/ y /r/ para capturar tanto tareas como materiales del profe.
     """
     link = assignment.get("link", "")
     if not link or "/c/" not in link:
         return []
 
-    try:
-        await page.goto(link, wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(2)
-    except Exception as e:
-        print(f"       [WARN] No se pudo abrir tarea: {e}")
-        return []
+    # Determinar paths a intentar según el tipo del item
+    tipo = assignment.get("tipo", "tarea")
+    if tipo == "material":
+        # Materiales del profe: intentar /r/ primero, luego /a/
+        alt_link = link.replace("/a/", "/r/")
+        links_to_try = [alt_link, link] if alt_link != link else [link]
+    else:
+        # Tareas: intentar /a/ primero, luego /r/
+        alt_link = link.replace("/a/", "/r/")
+        links_to_try = [link, alt_link] if alt_link != link else [link]
 
-    materials = await page.evaluate("""() => {
+    materials = []
+    for try_link in links_to_try:
+        try:
+            await page.goto(try_link, wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(2)
+        except Exception as e:
+            continue
+
+        materials = await _extract_page_materials(page)
+        if materials:
+            break  # Encontramos materiales, no hace falta intentar el otro path
+
+    return materials
+
+
+async def _extract_page_materials(page: Page) -> list[dict]:
+    """
+    Extrae links a Drive/Docs/YouTube de la página actual.
+    Helper usado por get_assignment_materials.
+    """
+    return await page.evaluate("""() => {
         const result = [];
         const seen = new Set();
 
@@ -372,8 +596,6 @@ async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
         }
         return result;
     }""")
-
-    return materials
 
 
 async def get_course_announcements(page: Page, course: dict) -> list[dict]:
@@ -627,28 +849,37 @@ async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = T
             n_mats   = sum(1 for i in all_items if i["tipo"] == "material")
             print(f"\n[RESUMEN] {alumno['nombre']}: {n_tareas} tareas + {n_mats} materiales en {len(courses)} cursos")
 
-            # Extraer archivos adjuntos de cada item (navegando dentro)
+            # Recopilar materiales inline extraídos directamente del stream DOM
+            # (Drive/Docs links visibles en el post del profe, sin navegar a páginas extra)
             all_materiales = []
+            for item in all_items:
+                inline = item.pop("materiales_inline", [])
+                for m in inline:
+                    m["curso"] = item["curso"]
+                    m["tarea_titulo"] = item["titulo"]
+                    m["tarea_link"] = item.get("link", "")
+                all_materiales.extend(inline)
+
+            n_inline = len(all_materiales)
+            print(f"[INFO] {n_inline} archivos inline encontrados en el stream")
+
+            # Si deep=True, además navegar a tareas pendientes para extraer sus adjuntos
             if deep and all_items:
-                # Materiales del profe (/r/): TODOS sin límite
-                # Tareas: solo las pendientes/atrasadas (hasta 15)
-                items_material = [i for i in all_items if i.get("tipo") == "material"]
-                items_tareas   = [i for i in all_items if i.get("tipo") == "tarea"
-                                  and i.get("estado") in ("pendiente", "atrasado")][:15]
-                items_for_materials = items_material + items_tareas
+                items_tareas = [i for i in all_items if i.get("tipo") == "tarea"
+                                and i.get("estado") in ("pendiente", "atrasado")][:15]
+                if items_tareas:
+                    print(f"[INFO] Extrayendo adjuntos de {len(items_tareas)} tareas pendientes...")
+                    for item in items_tareas:
+                        mats = await get_assignment_materials(page, item)
+                        for m in mats:
+                            m["curso"] = item["curso"]
+                            m["tarea_titulo"] = item["titulo"]
+                            m["tarea_link"] = item.get("link", "")
+                        if mats:
+                            print(f"       {item['titulo'][:50]}: {len(mats)} archivos")
+                        all_materiales.extend(mats)
 
-                print(f"[INFO] Extrayendo archivos de {len(items_material)} materiales + {len(items_tareas)} tareas pendientes...")
-                for item in items_for_materials:
-                    mats = await get_assignment_materials(page, item)
-                    for m in mats:
-                        m["curso"] = item["curso"]
-                        m["tarea_titulo"] = item["titulo"]
-                        m["tarea_link"] = item.get("link", "")
-                    if mats:
-                        print(f"       {item['titulo'][:50]}: {len(mats)} archivos")
-                    all_materiales.extend(mats)
-
-                print(f"[RESUMEN] {len(all_materiales)} materiales extraídos")
+            print(f"[RESUMEN] {len(all_materiales)} materiales totales")
 
             # Guardar JSON debug
             debug_path = OUTPUT_DIR / f"debug_classroom_{alumno['slug']}.json"

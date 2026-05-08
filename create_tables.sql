@@ -60,3 +60,18 @@ CREATE TABLE IF NOT EXISTS classroom_materiales (
 
 CREATE INDEX IF NOT EXISTS idx_classroom_mat_alumno ON classroom_materiales (alumno);
 CREATE INDEX IF NOT EXISTS idx_classroom_mat_curso  ON classroom_materiales (curso);
+
+
+-- Log de acciones cumplidas por el padre (para no volver a solicitar lo mismo)
+CREATE TABLE IF NOT EXISTS acciones_log (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_titulo    text NOT NULL,
+  item_tipo      text DEFAULT 'urgente',
+  alumno         text,
+  porcentaje     int DEFAULT 100,
+  nota_padre     text,
+  registrado_por text DEFAULT 'padre',
+  created_at     timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_acciones_log_titulo  ON acciones_log (item_titulo);
+CREATE INDEX IF NOT EXISTS idx_acciones_log_created ON acciones_log (created_at DESC);
