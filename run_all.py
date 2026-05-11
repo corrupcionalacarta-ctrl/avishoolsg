@@ -81,6 +81,16 @@ def step_classroom() -> bool:
     return run_step("classroom", [PYTHON, str(HERE / "classroom_extractor.py")], timeout=300)
 
 
+def step_drive_shared() -> bool:
+    """Extrae y descarga archivos de Drive 'Compartido conmigo' (pruebas, guías, pautas)."""
+    return run_step("drive_shared", [PYTHON, str(HERE / "drive_shared_extractor.py"), "--download"], timeout=600)
+
+
+def step_drive_analyzer() -> bool:
+    """Analiza con Gemini los archivos descargados de Drive (nuevos solamente)."""
+    return run_step("drive_analyzer", [PYTHON, str(HERE / "drive_analyzer.py")], timeout=300)
+
+
 def step_schoolnet() -> bool:
     return run_step("schoolnet", [PYTHON, str(HERE / "schoolnet_extractor.py"), "--only", "schoolnet"], timeout=900)
 
@@ -117,6 +127,8 @@ def main():
         results["schoolnet"] = step_schoolnet()
         results["grades"] = step_grades()
         results["classroom"] = step_classroom()
+        results["drive_shared"] = step_drive_shared()
+        results["drive_analyzer"] = step_drive_analyzer()
         results["ai_analysis"] = step_ai_analysis()
     elif args.evening:
         results["gmail"] = step_gmail(hours=168)  # 7 días

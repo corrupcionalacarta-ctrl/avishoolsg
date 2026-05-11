@@ -9,7 +9,7 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
     ? alumnoFiltro.charAt(0).toUpperCase() + alumnoFiltro.slice(1)
     : null
 
-  const [digestRes, fechasRes, notasRes, anotacionesRes, analisisRes, classroomRes, materialesRes] = await Promise.all([
+  const [digestRes, fechasRes, notasRes, anotacionesRes, analisisRes, classroomRes, materialesRes, archivosRes] = await Promise.all([
     supabase
       .from('digests')
       .select('resumen_ejecutivo, json_completo, created_at')
@@ -55,6 +55,13 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
     supabase
       .from('classroom_materiales')
       .select('alumno, curso, tarea_titulo, nombre, url, tipo')
+      .limit(100),
+
+    // Archivos analizados por IA (Drive Compartido conmigo)
+    supabase
+      .from('classroom_archivos')
+      .select('alumno, asignatura, tipo_contenido, titulo_inferido, unidad_tematica, temas, resumen, tiene_respuestas, fecha_probable, preguntas')
+      .order('asignatura')
       .limit(100),
   ])
 
@@ -186,6 +193,46 @@ export async function buildContext(alumnoFiltro?: string): Promise<string> {
           const tipo = m.tipo ? `(${m.tipo})` : ''
           lines.push(`    - ${m.nombre} ${tipo} → ${m.url}`)
         })
+      }
+      lines.push('')
+    }
+  }
+
+  // Archivos analizados por IA (pruebas, guías, pautas, material del colegio)
+  if (archivosRes.data?.length) {
+    const filtrados = archivosRes.data.filter(a =>
+      !primerNombre || (a.alumno ?? '').toLowerCase().includes(primerNombre.toLowerCase())
+    )
+    if (filtrados.length) {
+      lines.push('━━━ ARCHIVOS ANALIZADOS POR IA (DRIVE COMPARTIDO) ━━━')
+      lines.push('(Estos son archivos reales del colegio: pruebas, guías, pautas, material del profesor)')
+
+      // Agrupar por asignatura
+      const byAsig: Record<string, typeof filtrados> = {}
+      for (const a of filtrados) {
+        const asig = a.asignatura ?? 'Sin asignatura'
+        if (!byAsig[asig]) byAsig[asig] = []
+        byAsig[asig].push(a)
+      }
+
+      for (const [asig, archivos] of Object.entries(byAsig)) {
+        lines.push(`  [${asig}]`)
+        for (const a of archivos) {
+          const tipo = (a.tipo_contenido ?? 'archivo').toUpperCase()
+          const titulo = a.titulo_inferido ?? '(sin título)'
+          const temasRaw = a.temas
+          const temasArr: string[] = Array.isArray(temasRaw) ? temasRaw : (typeof temasRaw === 'string' ? JSON.parse(temasRaw || '[]') : [])
+          const temas = temasArr.slice(0, 4).join(', ')
+          const pregRaw = a.preguntas
+          const nPreg = Array.isArray(pregRaw) ? pregRaw.length : (typeof pregRaw === 'string' ? JSON.parse(pregRaw || '[]').length : 0)
+          const respTag = a.tiene_respuestas ? ' ✓respuestas' : ''
+          lines.push(`    - [${tipo}] ${titulo}`)
+          if (a.unidad_tematica) lines.push(`      Unidad: ${a.unidad_tematica}`)
+          if (temas) lines.push(`      Temas: ${temas}`)
+          if (nPreg > 0) lines.push(`      ${nPreg} preguntas/ejercicios${respTag}`)
+          if (a.resumen) lines.push(`      Resumen: ${(a.resumen as string).slice(0, 200)}`)
+          if (a.fecha_probable) lines.push(`      Fecha probable: ${a.fecha_probable}`)
+        }
       }
       lines.push('')
     }
