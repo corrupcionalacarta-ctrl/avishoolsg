@@ -389,6 +389,62 @@ export default async function AlumnoDetalle({ params }: { params: Promise<{ slug
         </section>
       )}
 
+      {/* CUMPLIMIENTO POR ASIGNATURA */}
+      {classroom.length > 0 && (() => {
+        // Agrupar por curso y calcular % entrega
+        const byCurso: Record<string, { total: number; entregadas: number; atrasadas: number }> = {}
+        for (const item of classroom) {
+          if (!byCurso[item.curso]) byCurso[item.curso] = { total: 0, entregadas: 0, atrasadas: 0 }
+          byCurso[item.curso].total++
+          if (item.estado === 'entregado' || item.estado === 'calificado' || item.estado === 'devuelto') {
+            byCurso[item.curso].entregadas++
+          } else if (item.estado === 'atrasado') {
+            byCurso[item.curso].atrasadas++
+          }
+        }
+        const cursos = Object.entries(byCurso).sort((a, b) => {
+          const pctA = a[1].entregadas / a[1].total
+          const pctB = b[1].entregadas / b[1].total
+          return pctA - pctB  // peor cumplimiento primero
+        })
+        return (
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#4285f4' }} />
+              <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Cumplimiento Classroom</h2>
+            </div>
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+              {cursos.map(([curso, stats], i) => {
+                const pct = Math.round((stats.entregadas / stats.total) * 100)
+                const color = pct >= 90 ? '#0d9488' : pct >= 70 ? '#d97706' : '#ef4444'
+                return (
+                  <div key={i} className="px-4 py-3" style={{ borderBottom: i < cursos.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[12px] font-semibold truncate flex-1" style={{ color: '#475569' }}>{curso}</p>
+                      <div className="flex items-center gap-2 ml-2">
+                        {stats.atrasadas > 0 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                            style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
+                            {stats.atrasadas} atras.
+                          </span>
+                        )}
+                        <p className="text-[13px] font-black" style={{ color }}>{pct}%</p>
+                      </div>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#f1f5f9' }}>
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+                    </div>
+                    <p className="text-[10px] mt-1" style={{ color: '#94a3b8' }}>
+                      {stats.entregadas} de {stats.total} tareas entregadas
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
+
       {/* GOOGLE CLASSROOM */}
       {classroom.length > 0 && (
         <section className="space-y-2">

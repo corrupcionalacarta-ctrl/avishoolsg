@@ -104,6 +104,19 @@ def step_ai_analysis() -> bool:
     return run_step("ai_analysis", [PYTHON, str(HERE / "ai_analysis.py")], timeout=120)
 
 
+def step_smart_alerts() -> bool:
+    """Semáforo de riesgo + detector de semana pesada (notifica solo si hay alertas)."""
+    return run_step("smart_alerts", [PYTHON, str(HERE / "smart_alerts.py"), "--riesgo", "--semana"], timeout=120)
+
+
+def step_plan_semanal() -> bool:
+    """Plan de estudio semanal — solo se corre los domingos."""
+    if datetime.now().weekday() != 6:  # 6 = domingo
+        log("step_plan_semanal: omitido (no es domingo)")
+        return True
+    return run_step("plan_semanal", [PYTHON, str(HERE / "smart_alerts.py"), "--plan"], timeout=120)
+
+
 def step_digest(run_mode: str = "manual") -> bool:
     env = os.environ.copy()
     env["RUN_MODE"] = run_mode
@@ -130,6 +143,8 @@ def main():
         results["drive_shared"] = step_drive_shared()
         results["drive_analyzer"] = step_drive_analyzer()
         results["ai_analysis"] = step_ai_analysis()
+        results["smart_alerts"] = step_smart_alerts()
+        results["plan_semanal"] = step_plan_semanal()
     elif args.evening:
         results["gmail"] = step_gmail(hours=168)  # 7 días
     elif args.gmail_only:

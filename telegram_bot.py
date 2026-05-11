@@ -29,6 +29,13 @@ from google import genai
 from google.genai import types
 from supabase import create_client
 
+# Alertas inteligentes (importación lazy para no fallar si el módulo no está)
+try:
+    import smart_alerts as _sa
+    _SMART_ALERTS_OK = True
+except ImportError:
+    _SMART_ALERTS_OK = False
+
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
@@ -471,16 +478,52 @@ def run_bot():
                 if cmd in ["/start", "/ayuda"]:
                     resp = (
                         "👋 <b>AVI School Bot</b>\n\n"
-                        "Comandos:\n"
+                        "Comandos rápidos:\n"
                         "/hoy — resumen del dia\n"
                         "/urgente — tareas urgentes\n"
                         "/fechas — proximas pruebas y eventos\n"
                         "/utiles — utiles para mañana\n\n"
+                        "Alertas inteligentes:\n"
+                        "/riesgo — semáforo de riesgo académico\n"
+                        "/semana — detectar semana con muchas pruebas\n"
+                        "/plan — plan de estudio para esta semana\n"
+                        "/informe — informe mensual completo\n\n"
                         "O escribe cualquier pregunta:\n"
                         "• ¿Cómo va Clemente en notas?\n"
                         "• ¿Tiene Raimundo prueba esta semana?\n"
                         "• ¿Qué llevo mañana?"
                     )
+                elif cmd == "/riesgo":
+                    if _SMART_ALERTS_OK:
+                        send_message(chat_id, "🔍 Analizando riesgo académico...")
+                        _sa.check_riesgo(notify=True)
+                        resp = None  # smart_alerts ya envió el mensaje
+                    else:
+                        resp = "⚠ Módulo smart_alerts no disponible"
+                elif cmd == "/semana":
+                    if _SMART_ALERTS_OK:
+                        send_message(chat_id, "📅 Revisando carga de la semana...")
+                        _sa.check_semana_pesada(notify=True)
+                        resp = None
+                    else:
+                        resp = "⚠ Módulo smart_alerts no disponible"
+                elif cmd == "/plan":
+                    if _SMART_ALERTS_OK:
+                        send_message(chat_id, "📚 Generando plan de estudio con IA...")
+                        _sa.generar_plan_semanal(notify=True)
+                        resp = None
+                    else:
+                        resp = "⚠ Módulo smart_alerts no disponible"
+                elif cmd == "/informe":
+                    if _SMART_ALERTS_OK:
+                        # /informe o /informe 2026-04
+                        partes = text.split()
+                        mes = partes[1] if len(partes) > 1 else None
+                        send_message(chat_id, "📊 Generando informe mensual con IA...")
+                        _sa.generar_informe_mensual(mes=mes, notify=True)
+                        resp = None
+                    else:
+                        resp = "⚠ Módulo smart_alerts no disponible"
                 elif cmd in COMMAND_RESPONSES or cmd in ["/hoy", "/urgente", "/fechas", "/utiles"]:
                     resp = handle_command(cmd, digest)
                     if resp is None:
@@ -493,7 +536,8 @@ def run_bot():
                     if len(historial) > 20:
                         historial = historial[-20:]
 
-                send_message(chat_id, resp)
+                if resp is not None:
+                    send_message(chat_id, resp)
                 print(f"[OK] Respondido")
 
         except KeyboardInterrupt:
