@@ -266,7 +266,7 @@ def build_context(alumno_filtro: str | None = None) -> str:
     return "\n".join(lines)
 
 
-SYSTEM_PROMPT = """Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y su señora con la agenda de sus hijos en el Colegio Georgian (Saint George), Chile:
+SYSTEM_PROMPT = """Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y Clau con la agenda de sus hijos en el Colegio Georgian (Saint George), Chile:
 - Clemente Aravena, 11 años, 6°D
 - Raimundo Aravena, 9 años, 4°A
 

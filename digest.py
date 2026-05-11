@@ -142,7 +142,7 @@ def normalize_items() -> list[dict]:
 
 # ===== CLASIFICACION CON GEMINI =====
 
-CLASSIFY_PROMPT = """Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y su señora con la agenda de sus hijos:
+CLASSIFY_PROMPT = """Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y Clau con la agenda de sus hijos:
 - Clemente Aravena, 11 años, 6°D, Colegio Georgian (Saint George)
 - Raimundo Aravena, 9 años, 4°A, Colegio Georgian (Saint George)
 Cuando puedas identificar a qué alumno corresponde un item, mencionalo por nombre en el detalle.

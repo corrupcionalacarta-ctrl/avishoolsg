@@ -35,7 +35,7 @@ ALUMNOS = [
 
 ANALISIS_PROMPT = """Eres un psicopedagogo escolar especializado en educación primaria chilena.
 Analizas el perfil COMPLETO de un alumno basándote en su historial real de notas, conducta y comunicaciones del colegio.
-Tu objetivo es ayudar a los padres (Manuel y señora) a entender el estado actual de su hijo y qué acciones tomar.
+Tu objetivo es ayudar a los padres (Manuel y Clau) a entender el estado actual de su hijo y qué acciones tomar.
 
 ALUMNO: {nombre}
 CURSO: {curso}, Colegio Georgian (Saint George), Chile

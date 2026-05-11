@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       ? `Estás ayudando específicamente sobre ${alumno.charAt(0).toUpperCase() + alumno.slice(1)}.`
       : 'Puedes hablar sobre ambos alumnos.'
 
-    const system = `Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y su señora con la agenda de sus hijos:
+    const system = `Eres un asistente escolar para apoderados chilenos. Ayudas a Manuel y Clau con la agenda de sus hijos:
 - Clemente Aravena, 11 años, 6°D
 - Raimundo Aravena, 9 años, 4°A
 Colegio Georgian (Saint George), Chile.
@@ -49,10 +49,12 @@ INSTRUCCIONES:
       systemInstruction: system,
     })
 
-    const chatHistory = (historial as { rol: string; contenido: string }[]).slice(-8).map(m => ({
-      role: m.rol === 'user' ? 'user' : 'model',
-      parts: [{ text: m.contenido }],
-    }))
+    // Gemini requires history to start with 'user' — drop any leading model messages
+    const rawHistory = (historial as { rol: string; contenido: string }[])
+      .slice(-8)
+      .map(m => ({ role: m.rol === 'user' ? 'user' : 'model', parts: [{ text: m.contenido }] }))
+    const firstUserIdx = rawHistory.findIndex(m => m.role === 'user')
+    const chatHistory = firstUserIdx >= 0 ? rawHistory.slice(firstUserIdx) : []
 
     const chat = model.startChat({ history: chatHistory })
     const result = await chat.sendMessage(pregunta)
