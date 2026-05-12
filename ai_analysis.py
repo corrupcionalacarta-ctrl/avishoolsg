@@ -185,10 +185,20 @@ def run_analysis(nombre: str, curso: str) -> bool:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.3,
-                max_output_tokens=1024,
+                max_output_tokens=2048,
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
-        raw = resp.text.strip()
+        # Extraer texto de la respuesta (puede tener partes de thinking)
+        raw = ""
+        if resp.candidates:
+            for part in resp.candidates[0].content.parts:
+                if hasattr(part, "text") and part.text:
+                    raw += part.text
+        if not raw:
+            raw = resp.text or ""
+        raw = raw.strip()
         print(f"[INFO] Respuesta Gemini ({len(raw)} chars)")
 
         data = parse_gemini_json(raw)

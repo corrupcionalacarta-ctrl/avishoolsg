@@ -32,7 +32,7 @@ $settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask -TaskName "AVI School Morning" `
     -Description "Pipeline matutino: gmail+schoolnet+classroom+digest" `
     -Trigger $trigger -Action $action -Settings $settings -Force
-Write-Host "[OK] AVI School Morning — 06:30 diario"
+Write-Host "[OK] AVI School Morning - 06:30 diario"
 
 # === EVENING: 18:30 PM ===
 $trigger  = New-ScheduledTaskTrigger -Daily -At "18:30"
@@ -44,25 +44,24 @@ $settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask -TaskName "AVI School Evening" `
     -Description "Pipeline vespertino: gmail+digest" `
     -Trigger $trigger -Action $action -Settings $settings -Force
-Write-Host "[OK] AVI School Evening — 18:30 diario"
+Write-Host "[OK] AVI School Evening - 18:30 diario"
 
-# === TELEGRAM BOT: al iniciar sesion, siempre activo ===
-$trigger  = New-ScheduledTaskTrigger -AtLogOn
-$action   = New-ScheduledTaskAction -Execute $botBat -WorkingDirectory $here
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Days 365) `
-    -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName "AVI School Bot" `
-    -Description "Telegram bot conversacional — siempre activo" `
-    -Trigger $trigger -Action $action -Settings $settings -Force
-Write-Host "[OK] AVI School Bot — arranca al login, se reinicia si cae"
+# === TELEGRAM BOT: carpeta Startup (no requiere admin) ===
+$startupDir = [System.Environment]::GetFolderPath("Startup")
+$shortcut   = Join-Path $startupDir "AVI School Bot.lnk"
+$wsh  = New-Object -ComObject WScript.Shell
+$link = $wsh.CreateShortcut($shortcut)
+$link.TargetPath       = $botBat
+$link.WorkingDirectory = $here
+$link.WindowStyle      = 7   # minimizado
+$link.Description      = "AVI School Telegram Bot"
+$link.Save()
+Write-Host "[OK] AVI School Bot - acceso directo en Startup (arranca con Windows)"
 
 Write-Host ""
 Write-Host "Tareas registradas:"
 Get-ScheduledTask -TaskName "AVI School*" | Format-Table TaskName, State -AutoSize
 
 Write-Host ""
-Write-Host "Para iniciar el bot AHORA sin reiniciar:"
-Write-Host "  Start-ScheduledTask -TaskName 'AVI School Bot'"
+Write-Host "Para iniciar el bot AHORA:"
+Write-Host "  Start-Process '$botBat'"

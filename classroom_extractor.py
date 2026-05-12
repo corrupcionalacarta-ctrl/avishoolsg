@@ -167,6 +167,174 @@ async def login_manual(page: Page, alumno: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Classroom API via browser session (sin OAuth externo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def classroom_api_fetch(page: Page, path: str, params: dict | None = None, token: str | None = None) -> dict | None:
+    """
+    Llama la Classroom REST API con un Bearer token capturado del browser.
+    El token proviene de interceptar las propias llamadas del frontend de Classroom.
+    """
+    base = "https://classroom.googleapis.com/v1"
+    qs = ""
+    if params:
+        qs = "?" + "&".join(f"{k}={v}" for k, v in params.items())
+    url = f"{base}{path}{qs}"
+
+    headers: dict = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    result = await page.evaluate(f"""async () => {{
+        try {{
+            const r = await fetch({json.dumps(url)}, {{
+                credentials: 'omit',
+                headers: {json.dumps(headers)}
+            }});
+            if (!r.ok) return {{ _error: r.status, _text: await r.text() }};
+            return await r.json();
+        }} catch(e) {{
+            return {{ _error: e.toString() }};
+        }}
+    }}""")
+    return result
+
+
+async def api_get_courses(page: Page, token: str) -> list[dict]:
+    """Obtiene cursos via API (mucho más rápido que scraping DOM)."""
+    data = await classroom_api_fetch(page, "/courses", {"studentId": "me", "courseStates": "ACTIVE", "pageSize": "50"}, token=token)
+    if not data or "_error" in data:
+        print(f"     [WARN] API courses: {data}")
+        return []
+    return [{"id": c["id"], "nombre": c["name"]} for c in data.get("courses", [])]
+
+
+async def api_get_course_materials(page: Page, course_id: str, token: str) -> list[dict]:
+    """Obtiene materiales del profe (courseWorkMaterials) con sus archivos adjuntos."""
+    data = await classroom_api_fetch(page, f"/courses/{course_id}/courseWorkMaterials", {"pageSize": "100"}, token=token)
+    if not data or "_error" in data:
+        return []
+
+    items = []
+    for m in data.get("courseWorkMaterial", []):
+        materiales = _api_extract_files(m)
+        items.append({
+            "titulo":            m.get("title", ""),
+            "tipo":              "material",
+            "estado":            "informativo",
+            "link":              m.get("alternateLink", ""),
+            "fecha_entrega":     None,
+            "calificacion":      None,
+            "materiales_inline": materiales,
+        })
+    return items
+
+
+async def api_get_course_work(page: Page, course_id: str, token: str) -> list[dict]:
+    """Obtiene tareas (courseWork) con archivos adjuntos."""
+    data = await classroom_api_fetch(page, f"/courses/{course_id}/courseWork", {"pageSize": "100"}, token=token)
+    if not data or "_error" in data:
+        return []
+
+    items = []
+    for cw in data.get("courseWork", []):
+        due = cw.get("dueDate")
+        fecha_entrega = None
+        if due:
+            try:
+                from datetime import date
+                fecha_entrega = date(due["year"], due["month"], due["day"]).isoformat()
+            except Exception:
+                pass
+        materiales = _api_extract_files(cw)
+        items.append({
+            "titulo":            cw.get("title", ""),
+            "tipo":              "tarea",
+            "estado":            "pendiente",
+            "link":              cw.get("alternateLink", ""),
+            "fecha_entrega":     fecha_entrega,
+            "calificacion":      None,
+            "materiales_inline": materiales,
+        })
+    return items
+
+
+async def api_enrich_submissions(page: Page, course_id: str, items: list[dict], token: str):
+    """Agrega estado de entrega real del alumno a las tareas."""
+    data = await classroom_api_fetch(page, f"/courses/{course_id}/courseWork/-/studentSubmissions",
+                                     {"userId": "me", "pageSize": "100"}, token=token)
+    if not data or "_error" in data:
+        return
+
+    sub_map: dict[str, dict] = {}
+    for s in data.get("studentSubmissions", []):
+        sub_map[s.get("courseWorkId", "")] = s
+
+    for item in items:
+        if item["tipo"] != "tarea":
+            continue
+        link = item.get("link", "")
+        cwid = link.rstrip("/").split("/")[-1]
+        sub = sub_map.get(cwid)
+        if not sub:
+            continue
+        state = sub.get("state", "")
+        grade = sub.get("assignedGrade")
+        if state == "TURNED_IN":
+            item["estado"] = "entregado"
+        elif state == "RETURNED" and grade is not None:
+            item["estado"] = "calificado"
+            item["calificacion"] = str(grade)
+        elif state == "RETURNED":
+            item["estado"] = "devuelto"
+
+
+def _api_extract_files(obj: dict) -> list[dict]:
+    """Extrae archivos adjuntos de un item de la API."""
+    result = []
+    for mat in obj.get("materials", []):
+        if "driveFile" in mat:
+            df = mat["driveFile"]["driveFile"]
+            title = df.get("title", "Archivo")
+            result.append({
+                "nombre": title,
+                "url":    df.get("alternateLink", ""),
+                "tipo":   _drive_file_tipo(title),
+            })
+        elif "youtubeVideo" in mat:
+            yt = mat["youtubeVideo"]
+            result.append({
+                "nombre": yt.get("title", "Video YouTube"),
+                "url":    yt.get("alternateLink", ""),
+                "tipo":   "video",
+            })
+        elif "link" in mat:
+            lk = mat["link"]
+            result.append({
+                "nombre": lk.get("title") or lk.get("url", "Link"),
+                "url":    lk.get("url", ""),
+                "tipo":   "sitio",
+            })
+        elif "form" in mat:
+            fm = mat["form"]
+            result.append({
+                "nombre": fm.get("title", "Formulario"),
+                "url":    fm.get("formUrl", ""),
+                "tipo":   "formulario",
+            })
+    return result
+
+
+def _drive_file_tipo(name: str) -> str:
+    n = name.lower()
+    if any(x in n for x in [".pptx", ".ppt", "powerpoint"]):  return "presentacion"
+    if any(x in n for x in [".docx", ".doc"]):                return "documento"
+    if any(x in n for x in [".xlsx", ".xls"]):                return "hoja"
+    if ".pdf" in n:                                            return "pdf"
+    return "drive"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Scraping de Google Classroom
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -286,6 +454,66 @@ async def get_course_items(page: Page, course: dict) -> list[dict]:
     await page.evaluate("window.scrollTo(0, 0)")
     await asyncio.sleep(1)
 
+    # ── Extraer links de archivos desde el tab /t/all ─────────────────────────
+    # Las tarjetas de assignment en la vista "Trabajo de clase" muestran los
+    # archivos adjuntos como chips con <a href> a Drive/Docs/YouTube.
+    # También contienen los links reales de cada tarea/material (/a/ o /r/).
+    tab_work_links = await page.evaluate("""() => {
+        const result = [];
+        const seen = new Set();
+        const CONTENT_DOMAINS = [
+            'drive.google.com', 'docs.google.com', 'slides.google.com',
+            'forms.google.com', 'youtube.com/watch', 'youtu.be/',
+            'sites.google.com'
+        ];
+
+        // Links de tareas/materiales en el tab /t/all
+        // Cada item tiene un link /c/{id}/a/{taskId} o /c/{id}/r/{matId}
+        const itemLinks = [...document.querySelectorAll('a[href*="/c/"][href*="/a/"], a[href*="/c/"][href*="/r/"]')];
+        for (const a of itemLinks) {
+            const href = a.href;
+            if (seen.has(href) || !href.includes('classroom.google.com')) continue;
+            seen.add(href);
+
+            // Determinar tipo por path
+            let tipo = href.includes('/r/') ? 'material' : 'tarea';
+
+            // Título: texto del link o del card
+            const card = a.closest('li, [role="listitem"], [class*="card"], [class*="Card"]') || a.parentElement;
+            let titulo = (a.getAttribute('aria-label') || a.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 200);
+
+            // Archivos adjuntos dentro del mismo card
+            const cardFiles = [];
+            if (card) {
+                const fileLinks = [...card.querySelectorAll('a[href]')];
+                for (const fa of fileLinks) {
+                    const fhref = fa.href;
+                    if (!CONTENT_DOMAINS.some(d => fhref.includes(d))) continue;
+                    let fTipo = 'drive';
+                    if (fhref.includes('docs.google.com/document')) fTipo = 'documento';
+                    else if (fhref.includes('docs.google.com/presentation') || fhref.includes('slides.google.com')) fTipo = 'presentacion';
+                    else if (fhref.includes('docs.google.com/spreadsheets')) fTipo = 'hoja';
+                    else if (fhref.includes('docs.google.com/forms') || fhref.includes('forms.google.com')) fTipo = 'formulario';
+                    else if (fhref.includes('youtube.com') || fhref.includes('youtu.be')) fTipo = 'video';
+                    const fn = (fa.getAttribute('aria-label') || fa.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 200) || 'Archivo';
+                    cardFiles.push({ url: fhref, tipo: fTipo, nombre: fn });
+                }
+            }
+
+            result.push({ href, tipo, titulo, files: cardFiles });
+        }
+        return result;
+    }""")
+
+    # Construir mapa de links reales de tareas/materiales con sus archivos
+    # Clave: link del item (real /a/ o /r/ URL) → archivos adjuntos
+    tab_files_by_link: dict[str, list[dict]] = {}
+    tab_real_links: dict[str, dict] = {}  # titulo → {href, tipo}
+    for tw in tab_work_links:
+        tab_files_by_link[tw["href"]] = tw.get("files", [])
+        # Normalizar título para match posterior
+        tab_real_links[tw["href"]] = {"tipo": tw["tipo"], "titulo": tw["titulo"]}
+
     # Si dpT4Vd no llegó todavía, navegar al stream del curso también
     # (el stream dispara dpT4Vd con los items recientes del alumno)
     if not dpT4Vd_received.is_set():
@@ -392,6 +620,37 @@ async def get_course_items(page: Page, course: dict) -> list[dict]:
 
                 mats.push({ url: href, tipo, nombre });
             }
+
+            // Thumbnails Drive en <img src> dentro de este stream item
+            // Los file chips del stream renderizan <img> con el fileId en la URL
+            const imgs = [...div.querySelectorAll('img[src*="drive.google.com"], img[src*="googleusercontent.com"]')];
+            for (const img of imgs) {
+                const src = img.src || '';
+                let fileId = null;
+                const idParam = src.match(/[?&]id=([A-Za-z0-9_-]{15,})/);
+                if (idParam) fileId = idParam[1];
+                if (!fileId) {
+                    const pathMatch = src.match(/[/]file[/]d[/]([A-Za-z0-9_-]{15,})[/]/);
+                    if (pathMatch) fileId = pathMatch[1];
+                }
+                if (!fileId) continue;
+                const url = `https://drive.google.com/file/d/${fileId}/view`;
+                if (seenLinks.has(url)) continue;
+                seenLinks.add(url);
+
+                const chip = img.closest('[aria-label], [data-tooltip], [title]') || img.parentElement;
+                let nombre = (
+                    (chip && chip.getAttribute('aria-label')) ||
+                    (chip && chip.getAttribute('data-tooltip')) ||
+                    (chip && chip.getAttribute('title')) ||
+                    img.getAttribute('alt') || ''
+                ).replace(/\\s+/g, ' ').trim();
+                nombre = nombre.replace(/^(thumbnail|preview|abrir|open)\\s*/i, '').trim();
+                if (!nombre || nombre.length < 2) nombre = `Archivo Drive (${fileId.substring(0, 8)}...)`;
+
+                mats.push({ url, tipo: 'drive', nombre });
+            }
+
             return mats;
         }
 
@@ -438,7 +697,7 @@ async def get_course_items(page: Page, course: dict) -> list[dict]:
             // Materiales inline (Drive/Docs links dentro del stream post)
             const materiales_inline = extractMaterials(div);
 
-            const link = `https://classroom.google.com/c/${courseId}/a/${itemId}/details`;
+            const link = `https://classroom.google.com/c/${courseId}/a/${itemId}`;
             result.push({ titulo, tipo, fecha_texto, estado, calificacion, link, materiales_inline });
         }
         return result;
@@ -447,6 +706,52 @@ async def get_course_items(page: Page, course: dict) -> list[dict]:
     # ── Estrategia 2: Parseo de batchexecute dpT4Vd ───────────────────────────
     if not items:
         items = _parse_batch_items(all_batch, course_id)
+
+    # ── Merge de archivos del tab /t/all → items del stream ───────────────────
+    # Intentamos asociar los archivos del classwork tab con los items del stream
+    # usando el título como clave de matching (fuzzy: startswith para tolerar truncado).
+    # Los que no matchean quedan como items extra con files.
+    if tab_files_by_link:
+        # Construir lookup de items por título normalizado
+        item_by_title: dict[str, dict] = {}
+        for item in items:
+            key = item.get("titulo", "").strip().lower()[:60]
+            if key:
+                item_by_title[key] = item
+
+        unmatched_tab_files: list[dict] = []
+        for tab_href, tab_files in tab_files_by_link.items():
+            if not tab_files:
+                continue
+            tab_info = tab_real_links.get(tab_href, {})
+            tab_title = tab_info.get("titulo", "").strip().lower()[:60]
+            matched_item = item_by_title.get(tab_title)
+            if not matched_item:
+                # Buscar coincidencia parcial
+                for key, item in item_by_title.items():
+                    if tab_title and (tab_title.startswith(key[:40]) or key.startswith(tab_title[:40])):
+                        matched_item = item
+                        break
+            if matched_item:
+                existing = {m["url"] for m in matched_item.get("materiales_inline", [])}
+                for f in tab_files:
+                    if f["url"] not in existing:
+                        matched_item.setdefault("materiales_inline", []).append(f)
+                        existing.add(f["url"])
+                # Usar link real del tab (tiene el ID real, no el stream item ID)
+                matched_item["link"] = tab_href.split("/details")[0]
+            else:
+                unmatched_tab_files.append({
+                    "titulo":            tab_info.get("titulo", "Material")[:200],
+                    "tipo":              tab_info.get("tipo", "material"),
+                    "estado":            "informativo",
+                    "link":              tab_href,
+                    "fecha_entrega":     None,
+                    "calificacion":      None,
+                    "fecha_texto":       "",
+                    "materiales_inline": tab_files,
+                })
+        items.extend(unmatched_tab_files)
 
     tareas    = [i for i in items if i["tipo"] == "tarea"]
     materiales = [i for i in items if i["tipo"] == "material"]
@@ -528,7 +833,7 @@ async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
     for try_link in links_to_try:
         try:
             await page.goto(try_link, wait_until="domcontentloaded", timeout=20000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(4)  # Dar tiempo al JS para renderizar file chips
         except Exception as e:
             continue
 
@@ -541,18 +846,44 @@ async def get_assignment_materials(page: Page, assignment: dict) -> list[dict]:
 
 async def _extract_page_materials(page: Page) -> list[dict]:
     """
-    Extrae links a Drive/Docs/YouTube de la página actual.
+    Extrae archivos adjuntos de la página actual.
+    Estrategia 1: links <a href> a Drive/Docs/YouTube.
+    Estrategia 2: thumbnails Drive en <img src> — los chips JS sí tienen img con el file ID.
     Helper usado por get_assignment_materials.
     """
     return await page.evaluate("""() => {
         const result = [];
         const seen = new Set();
 
+        function driveUrl(fileId) {
+            return `https://drive.google.com/file/d/${fileId}/view`;
+        }
+
+        function tipoFromName(name) {
+            const n = name.toLowerCase();
+            if (n.endsWith('.pptx') || n.endsWith('.ppt')) return 'presentacion';
+            if (n.endsWith('.docx') || n.endsWith('.doc')) return 'documento';
+            if (n.endsWith('.xlsx') || n.endsWith('.xls')) return 'hoja';
+            if (n.endsWith('.pdf')) return 'pdf';
+            return 'drive';
+        }
+
+        function tipoFromHref(href) {
+            if (href.includes('docs.google.com/document')) return 'documento';
+            if (href.includes('docs.google.com/presentation') || href.includes('slides.google.com')) return 'presentacion';
+            if (href.includes('docs.google.com/spreadsheets')) return 'hoja';
+            if (href.includes('docs.google.com/forms') || href.includes('forms.google.com')) return 'formulario';
+            if (href.includes('youtube.com') || href.includes('youtu.be')) return 'video';
+            if (href.includes('sites.google.com')) return 'sitio';
+            if (href.includes('drive.google.com')) return 'drive';
+            if (/\\.pdf/.test(href)) return 'pdf';
+            return 'archivo';
+        }
+
+        // ── Estrategia 1: <a href> a servicios Google ────────────────────────
         const links = [...document.querySelectorAll('a[href]')];
         for (const a of links) {
             const href = a.href || '';
-
-            // Solo links a servicios Google o archivos directos (no navegación interna)
             const isContent = (
                 href.includes('drive.google.com') ||
                 href.includes('docs.google.com') ||
@@ -563,22 +894,11 @@ async def _extract_page_materials(page: Page) -> list[dict]:
                 href.includes('sites.google.com') ||
                 /\\.pdf([?#]|$)/.test(href)
             );
-            if (!isContent) continue;
-            if (seen.has(href)) continue;
+            if (!isContent || seen.has(href)) continue;
             seen.add(href);
 
-            // Tipo de material
-            let tipo = 'archivo';
-            if (href.includes('docs.google.com/document')) tipo = 'documento';
-            else if (href.includes('docs.google.com/presentation') || href.includes('slides.google.com')) tipo = 'presentacion';
-            else if (href.includes('docs.google.com/spreadsheets')) tipo = 'hoja';
-            else if (href.includes('docs.google.com/forms') || href.includes('forms.google.com')) tipo = 'formulario';
-            else if (href.includes('youtube.com') || href.includes('youtu.be')) tipo = 'video';
-            else if (href.includes('sites.google.com')) tipo = 'sitio';
-            else if (href.includes('drive.google.com')) tipo = 'drive';
-            else if (/\\.pdf/.test(href)) tipo = 'pdf';
+            const tipo = tipoFromHref(href);
 
-            // Nombre: prioridad aria-label → texto del link
             const container = a.closest('[aria-label], [data-tooltip]') || a;
             let nombre = (
                 container.getAttribute('aria-label') ||
@@ -587,15 +907,160 @@ async def _extract_page_materials(page: Page) -> list[dict]:
                 a.getAttribute('title') ||
                 a.textContent
             ).replace(/\\s+/g, ' ').trim();
-
-            // Quitar prefijos genéricos de Google
             nombre = nombre.replace(/^(abrir|open|ver|view)\\s+/i, '').trim();
             if (!nombre || nombre.length < 2 || nombre.length > 200) continue;
 
             result.push({ nombre, url: href, tipo });
         }
+
+        // ── Estrategia 2: thumbnails Drive en <img src> ──────────────────────
+        // Los file chips de Classroom renderizan un <img> con src que contiene el fileId.
+        // Formatos conocidos:
+        //   drive.google.com/thumbnail?id=FILEID
+        //   lh3.googleusercontent.com/drive-viewer/...?id=FILEID
+        //   drive.google.com/file/d/FILEID/...
+        const imgs = [...document.querySelectorAll('img[src]')];
+        for (const img of imgs) {
+            const src = img.src || '';
+            if (!src.includes('drive.google.com') && !src.includes('googleusercontent.com')) continue;
+
+            let fileId = null;
+
+            // Patrón: ?id=FILEID o &id=FILEID
+            const idParam = src.match(/[?&]id=([A-Za-z0-9_-]{15,})/);
+            if (idParam) fileId = idParam[1];
+
+            // Patrón: /file/d/FILEID/
+            if (!fileId) {
+                const pathMatch = src.match(/[/]file[/]d[/]([A-Za-z0-9_-]{15,})[/]/);
+                if (pathMatch) fileId = pathMatch[1];
+            }
+
+            // Patrón: drive-viewer/FILEID o /d/FILEID
+            if (!fileId) {
+                const dvMatch = src.match(/drive-viewer[/]([A-Za-z0-9_-]{15,})/);
+                if (dvMatch) fileId = dvMatch[1].split('?')[0];
+            }
+
+            if (!fileId) continue;
+            const url = driveUrl(fileId);
+            if (seen.has(url)) continue;
+            seen.add(url);
+
+            // Intentar obtener nombre del chip: aria-label del contenedor o alt del img
+            const chip = img.closest('[aria-label], [data-tooltip], [title]') || img.parentElement;
+            let nombre = (
+                (chip && chip.getAttribute('aria-label')) ||
+                (chip && chip.getAttribute('data-tooltip')) ||
+                (chip && chip.getAttribute('title')) ||
+                img.getAttribute('alt') ||
+                ''
+            ).replace(/\\s+/g, ' ').trim();
+            nombre = nombre.replace(/^(abrir|open|ver|view|thumbnail|preview)\\s*/i, '').trim();
+
+            // Si no hay nombre útil, usar el contexto textual cercano
+            if (!nombre || nombre.length < 2) {
+                const nearText = chip?.textContent?.replace(/\\s+/g, ' ').trim().substring(0, 100) || '';
+                nombre = nearText || `Archivo Drive (${fileId.substring(0, 8)}...)`;
+            }
+
+            result.push({ nombre, url, tipo: tipoFromName(nombre) });
+        }
+
         return result;
     }""")
+
+
+async def get_files_by_clicking(page: Page, course_id: str, item_titles: list[str]) -> list[dict]:
+    """
+    Navega al tab /t/all, hace click en cada item por título para ir a la página de detalle real,
+    extrae archivos (incluyendo thumbnails Drive). Retorna lista de {nombre, url, tipo, tarea_titulo}.
+    Útil para conseguir archivos de pruebas y materiales sin OAuth.
+    """
+    await page.goto(f"https://classroom.google.com/c/{course_id}/t/all",
+                    wait_until="domcontentloaded", timeout=30000)
+    await asyncio.sleep(4)
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await asyncio.sleep(2)
+    await page.evaluate("window.scrollTo(0, 0)")
+    await asyncio.sleep(1)
+
+    all_files: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for title in item_titles:
+        try:
+            # Buscar el item por texto en el tab de classwork
+            title_short = title[:60]
+            el = page.get_by_text(title_short, exact=False).first
+            await el.scroll_into_view_if_needed(timeout=5000)
+            await el.click(timeout=5000)
+            await asyncio.sleep(4)  # Esperar que la página de detalle cargue con JS
+
+            real_url = page.url
+            files = await _extract_page_materials(page)
+            for f in files:
+                if f["url"] not in seen_urls:
+                    seen_urls.add(f["url"])
+                    f["tarea_titulo"] = title
+                    all_files.append(f)
+
+            # Volver al tab
+            await page.go_back(wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            # Si falla el click o la navegación, continuar con el siguiente
+            try:
+                await page.goto(f"https://classroom.google.com/c/{course_id}/t/all",
+                                wait_until="domcontentloaded", timeout=20000)
+                await asyncio.sleep(3)
+            except Exception:
+                pass
+
+    return all_files
+
+
+async def download_drive_file(page: Page, drive_url: str, dest_dir: Path) -> Path | None:
+    """
+    Descarga un archivo de Google Drive usando la sesión autenticada del browser.
+    Funciona con el mismo contexto de Playwright (cookies de sesión de Clemente).
+    Retorna el path del archivo descargado, o None si falla.
+    """
+    # Extraer fileId de la URL
+    file_id = None
+    m = re.search(r"[/]d[/]([A-Za-z0-9_-]{15,})", drive_url)
+    if m:
+        file_id = m.group(1)
+    m2 = re.search(r"[?&]id=([A-Za-z0-9_-]{15,})", drive_url)
+    if m2:
+        file_id = m2.group(1)
+
+    if not file_id:
+        return None
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Intentar descarga directa vía export URL
+    download_urls = [
+        f"https://drive.google.com/uc?export=download&id={file_id}",
+        f"https://drive.google.com/file/d/{file_id}/export?format=pdf",
+    ]
+
+    for dl_url in download_urls:
+        try:
+            async with page.expect_download(timeout=30000) as dl_info:
+                await page.goto(dl_url, wait_until="domcontentloaded", timeout=20000)
+            download = await dl_info.value
+            suggested = download.suggested_filename or f"{file_id}.bin"
+            dest = dest_dir / suggested
+            await download.save_as(str(dest))
+            print(f"     [DL] {suggested} ({dest.stat().st_size // 1024}KB)")
+            return dest
+        except Exception:
+            pass
+
+    return None
 
 
 async def get_course_announcements(page: Page, course: dict) -> list[dict]:
@@ -809,7 +1274,9 @@ def push_classroom_materiales(alumno_nombre: str, materiales: list[dict]) -> boo
 async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = True) -> tuple[list[dict], list[dict]]:
     """
     Extrae cursos, tareas y materiales adjuntos de un alumno.
-    deep=True (default): navega dentro de cada tarea para extraer archivos adjuntos.
+    Estrategia 1 (preferida): Classroom REST API via cookies de sesión del browser.
+    Estrategia 2 (fallback):  DOM scraping con Playwright.
+    deep=True (default): si el API falla, navega dentro de cada tarea para extraer adjuntos.
     Retorna (items, materiales).
     """
     print(f"\n{'='*60}")
@@ -821,6 +1288,19 @@ async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = T
         page = await ctx.new_page()
 
         try:
+            # ── Capturar Bearer token interceptando las propias llamadas del frontend ──
+            # Classroom web app llama classroom.googleapis.com con Authorization: Bearer.
+            # Escuchamos esas peticiones ANTES de navegar para capturar el token.
+            captured_tokens: list[str] = []
+
+            def _on_request(request):
+                if "classroom.googleapis.com" in request.url:
+                    auth = request.headers.get("authorization", "")
+                    if auth.startswith("Bearer "):
+                        captured_tokens.append(auth[7:])
+
+            page.on("request", _on_request)
+
             if force_login:
                 ok = await login_manual(page, alumno)
                 if not ok:
@@ -830,54 +1310,160 @@ async def extract_alumno(alumno: dict, force_login: bool = False, deep: bool = T
                 if not ok:
                     return [], []
 
-            # Obtener cursos
-            courses = await get_courses(page)
-            if not courses:
-                print(f"[WARN] No se encontraron cursos para {alumno['nombre']}")
-                return [], []
+            # Dar tiempo para que el frontend haga sus llamadas API iniciales
+            await asyncio.sleep(4)
 
-            # Extraer tareas Y materiales de cada curso
-            all_items = []
-            for course in courses:
-                items = await get_course_items(page, course)
-                for a in items:
-                    a["curso"] = course["nombre"]
-                    a["fecha_entrega"] = parse_fecha_classroom(a.pop("fecha_texto", ""))
-                all_items.extend(items)
+            # Si aún no capturamos token via interceptación de red, intentar extraerlo
+            # de los objetos JavaScript de GAPI/Google Identity que Classroom carga
+            if not captured_tokens:
+                gapi_token = await page.evaluate("""() => {
+                    try {
+                        // Método 1: gapi.auth legacy
+                        if (window.gapi && gapi.auth && gapi.auth.getToken) {
+                            const t = gapi.auth.getToken();
+                            if (t && t.access_token) return t.access_token;
+                        }
+                    } catch(e) {}
+                    try {
+                        // Método 2: gapi.auth2
+                        if (window.gapi && gapi.auth2) {
+                            const inst = gapi.auth2.getAuthInstance();
+                            if (inst) {
+                                const user = inst.currentUser.get();
+                                const auth = user.getAuthResponse(true);
+                                if (auth && auth.access_token) return auth.access_token;
+                            }
+                        }
+                    } catch(e) {}
+                    try {
+                        // Método 3: buscar en __STORE__ o variables globales de Angular/React
+                        for (const key of Object.keys(window)) {
+                            if (key.startsWith('__') && window[key] && typeof window[key] === 'object') {
+                                const val = JSON.stringify(window[key]);
+                                const m = val.match(/"access_token":"([^"]{50,})"/);
+                                if (m) return m[1];
+                            }
+                        }
+                    } catch(e) {}
+                    return null;
+                }""")
+                if gapi_token:
+                    captured_tokens.append(gapi_token)
+                    print(f"[OK] Bearer token desde GAPI JS ({len(gapi_token)} chars)")
 
-            n_tareas = sum(1 for i in all_items if i["tipo"] == "tarea")
-            n_mats   = sum(1 for i in all_items if i["tipo"] == "material")
-            print(f"\n[RESUMEN] {alumno['nombre']}: {n_tareas} tareas + {n_mats} materiales en {len(courses)} cursos")
+            # Si aún no: navegar dentro de un curso para forzar llamadas API adicionales
+            if not captured_tokens:
+                print("[INFO] Navegando a un curso para forzar llamadas API...")
+                first_course_id = await page.evaluate("""() => {
+                    const a = document.querySelector('a[href*="/c/"]');
+                    if (!a) return null;
+                    const m = a.href.match(/\\/c\\/([A-Za-z0-9_-]+)/);
+                    return m ? m[1] : null;
+                }""")
+                if first_course_id:
+                    await page.goto(f"https://classroom.google.com/c/{first_course_id}/t/all",
+                                    wait_until="domcontentloaded", timeout=30000)
+                    await asyncio.sleep(5)
 
-            # Recopilar materiales inline extraídos directamente del stream DOM
-            # (Drive/Docs links visibles en el post del profe, sin navegar a páginas extra)
-            all_materiales = []
-            for item in all_items:
-                inline = item.pop("materiales_inline", [])
-                for m in inline:
-                    m["curso"] = item["curso"]
-                    m["tarea_titulo"] = item["titulo"]
-                    m["tarea_link"] = item.get("link", "")
-                all_materiales.extend(inline)
+            page.remove_listener("request", _on_request)
 
-            n_inline = len(all_materiales)
-            print(f"[INFO] {n_inline} archivos inline encontrados en el stream")
+            access_token = captured_tokens[-1] if captured_tokens else None
+            if access_token:
+                print(f"[OK] Bearer token disponible ({len(access_token)} chars)")
+            else:
+                print("[WARN] No se capturó Bearer token — usando DOM scraping")
 
-            # Si deep=True, además navegar a tareas pendientes para extraer sus adjuntos
-            if deep and all_items:
-                items_tareas = [i for i in all_items if i.get("tipo") == "tarea"
-                                and i.get("estado") in ("pendiente", "atrasado")][:15]
-                if items_tareas:
-                    print(f"[INFO] Extrayendo adjuntos de {len(items_tareas)} tareas pendientes...")
-                    for item in items_tareas:
-                        mats = await get_assignment_materials(page, item)
-                        for m in mats:
-                            m["curso"] = item["curso"]
+            # ── Estrategia 1: Classroom REST API con Bearer token ─────────────────
+            courses = []
+            if access_token:
+                print("[INFO] Intentando Classroom REST API con Bearer token...")
+                courses = await api_get_courses(page, access_token)
+
+            if courses:
+                print(f"[OK] API: {len(courses)} cursos")
+                all_items: list[dict] = []
+                all_materiales: list[dict] = []
+
+                for course in courses:
+                    course_id = course["id"]
+                    mats = await api_get_course_materials(page, course_id, access_token)
+                    work = await api_get_course_work(page, course_id, access_token)
+                    await api_enrich_submissions(page, course_id, work, access_token)
+
+                    course_items = mats + work
+                    n_files = 0
+                    for item in course_items:
+                        item["curso"] = course["nombre"]
+                        inline = item.pop("materiales_inline", [])
+                        for m in inline:
+                            m["curso"]        = course["nombre"]
                             m["tarea_titulo"] = item["titulo"]
-                            m["tarea_link"] = item.get("link", "")
-                        if mats:
-                            print(f"       {item['titulo'][:50]}: {len(mats)} archivos")
-                        all_materiales.extend(mats)
+                            m["tarea_link"]   = item.get("link", "")
+                            all_materiales.append(m)
+                        n_files += len(inline)
+
+                    all_items.extend(course_items)
+                    n_tar = sum(1 for i in course_items if i["tipo"] == "tarea")
+                    n_mat = sum(1 for i in course_items if i["tipo"] == "material")
+                    print(f"     [{course['nombre']}] {n_tar} tareas, {n_mat} materiales ({n_files} archivos)")
+
+                n_tareas = sum(1 for i in all_items if i["tipo"] == "tarea")
+                n_mats   = sum(1 for i in all_items if i["tipo"] == "material")
+                print(f"\n[RESUMEN] {alumno['nombre']}: {n_tareas} tareas + {n_mats} materiales | {len(all_materiales)} archivos (via API)")
+
+            else:
+                # ── Estrategia 2: DOM scraping ────────────────────────────────────
+                print("[WARN] API no disponible — usando DOM scraping como fallback")
+                courses = await get_courses(page)
+                if not courses:
+                    print(f"[WARN] No se encontraron cursos para {alumno['nombre']}")
+                    return [], []
+
+                all_items = []
+                for course in courses:
+                    items = await get_course_items(page, course)
+                    for a in items:
+                        a["curso"] = course["nombre"]
+                        a["fecha_entrega"] = parse_fecha_classroom(a.pop("fecha_texto", ""))
+                    all_items.extend(items)
+
+                n_tareas = sum(1 for i in all_items if i["tipo"] == "tarea")
+                n_mats   = sum(1 for i in all_items if i["tipo"] == "material")
+                print(f"\n[RESUMEN] {alumno['nombre']}: {n_tareas} tareas + {n_mats} materiales en {len(courses)} cursos")
+
+                # Recopilar materiales inline del stream DOM
+                all_materiales = []
+                for item in all_items:
+                    inline = item.pop("materiales_inline", [])
+                    for m in inline:
+                        m["curso"]        = item["curso"]
+                        m["tarea_titulo"] = item["titulo"]
+                        m["tarea_link"]   = item.get("link", "")
+                    all_materiales.extend(inline)
+
+                print(f"[INFO] {len(all_materiales)} archivos inline encontrados en el stream")
+
+                # Deep: navegar a tareas/materiales para extraer adjuntos
+                if deep and all_items:
+                    # Tareas pendientes/atrasadas (hasta 10)
+                    items_deep = [i for i in all_items if i.get("tipo") == "tarea"
+                                  and i.get("estado") in ("pendiente", "atrasado")][:10]
+                    # Materiales de los últimos cursos (hasta 10, priorizando los primeros de la lista)
+                    items_deep += [i for i in all_items if i.get("tipo") == "material"][:10]
+                    if items_deep:
+                        print(f"[INFO] Extrayendo adjuntos de {len(items_deep)} items (tareas + materiales)...")
+                        existing_urls = {m["url"] for m in all_materiales}
+                        for item in items_deep:
+                            mats = await get_assignment_materials(page, item)
+                            new_mats = [m for m in mats if m["url"] not in existing_urls]
+                            for m in new_mats:
+                                m["curso"]        = item["curso"]
+                                m["tarea_titulo"] = item["titulo"]
+                                m["tarea_link"]   = item.get("link", "")
+                                existing_urls.add(m["url"])
+                            if new_mats:
+                                print(f"       {item['titulo'][:50]}: {len(new_mats)} archivos nuevos")
+                            all_materiales.extend(new_mats)
 
             print(f"[RESUMEN] {len(all_materiales)} materiales totales")
 

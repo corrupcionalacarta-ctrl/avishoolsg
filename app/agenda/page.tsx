@@ -13,13 +13,14 @@ type FechaRow = {
 
 function StudentTag({ alumno }: { alumno: string | null }) {
   const name = alumno ?? ''
-  if (!name) return null
-  const bg = name.toLowerCase().includes('raimundo') ? '#7c3aed'
-    : name.toLowerCase().includes('ambos') || name.toLowerCase().includes('shared') ? '#0d9488'
+  const isShared = !name || name.toLowerCase().includes('ambos') || name.toLowerCase().includes('shared')
+  const bg = isShared ? '#0d9488'
+    : name.toLowerCase().includes('raimundo') ? '#7c3aed'
     : '#1d4ed8'
+  const label = isShared ? 'Ambos' : name.split(' ')[0]
   return (
     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white uppercase tracking-tight flex-shrink-0" style={{ backgroundColor: bg }}>
-      {name.split(' ')[0]}
+      {label}
     </span>
   )
 }
