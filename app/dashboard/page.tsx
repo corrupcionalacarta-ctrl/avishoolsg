@@ -146,6 +146,64 @@ export default async function DashboardPage() {
         </div>
       )}
 
+      {/* COMPARATIVA ENTRE HERMANOS */}
+      {allNotas.length > 0 && (() => {
+        const materias = ['Matemática', 'Lenguaje', 'Ciencias', 'Historia', 'Inglés']
+        const rows: { materia: string; c: number | null; r: number | null }[] = []
+
+        for (const mat of materias) {
+          const notaC = allNotas.find(n =>
+            (n.alumno ?? '').toLowerCase().includes('clemente') &&
+            (n.asignatura ?? '').toLowerCase().includes(mat.toLowerCase().slice(0, 4)) &&
+            (n as any).tipo !== 'prueba'
+          )?.nota ?? null
+          const notaR = allNotas.find(n =>
+            (n.alumno ?? '').toLowerCase().includes('raimundo') &&
+            (n.asignatura ?? '').toLowerCase().includes(mat.toLowerCase().slice(0, 4)) &&
+            (n as any).tipo !== 'prueba'
+          )?.nota ?? null
+          if (notaC !== null || notaR !== null) rows.push({ materia: mat, c: notaC, r: notaR })
+        }
+
+        if (rows.length === 0) return null
+
+        return (
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-4 rounded-full" style={{ backgroundColor: '#0d9488' }} />
+              <h2 className="text-[16px] font-semibold" style={{ color: '#1e293b' }}>Comparativa hermanos</h2>
+            </div>
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+              <div className="grid grid-cols-3 px-4 py-2" style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                <p className="text-[11px] font-bold text-left" style={{ color: '#94a3b8' }}>Materia</p>
+                <p className="text-[11px] font-bold text-center" style={{ color: '#1e3a8a' }}>Clemente</p>
+                <p className="text-[11px] font-bold text-center" style={{ color: '#7c3aed' }}>Raimundo</p>
+              </div>
+              {rows.map(({ materia, c, r }, i) => {
+                const cColor = !c ? '#94a3b8' : c >= 6 ? '#0d9488' : c >= 5 ? '#d97706' : '#ef4444'
+                const rColor = !r ? '#94a3b8' : r >= 6 ? '#0d9488' : r >= 5 ? '#d97706' : '#ef4444'
+                const cWins = c !== null && r !== null && c > r
+                const rWins = c !== null && r !== null && r > c
+                return (
+                  <div key={i} className="grid grid-cols-3 px-4 py-2.5 items-center"
+                    style={{ borderBottom: i < rows.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                    <p className="text-[12px] font-medium" style={{ color: '#475569' }}>{materia}</p>
+                    <p className="text-[16px] font-black text-center" style={{ color: cColor }}>
+                      {c?.toFixed(1) ?? '—'}
+                      {cWins && <span className="text-[10px] ml-0.5">↑</span>}
+                    </p>
+                    <p className="text-[16px] font-black text-center" style={{ color: rColor }}>
+                      {r?.toFixed(1) ?? '—'}
+                      {rWins && <span className="text-[10px] ml-0.5">↑</span>}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
+
       {/* LLEVAR MAÑANA — standalone card, visible de inmediato */}
       {utiles.length > 0 && (
         <section className="rounded-2xl overflow-hidden"

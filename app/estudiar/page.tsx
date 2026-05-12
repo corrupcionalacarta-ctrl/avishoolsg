@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import PracticarButton from './PracticarButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -477,20 +478,31 @@ function ArchivoCard({ archivo: a }: { archivo: Archivo }) {
         </div>
       )}
 
-      {/* Footer: preguntas */}
-      {nPreguntas > 0 && (
-        <div className="flex items-center gap-1.5 pt-1" style={{ borderTop: '1px solid #f8fafc' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#94a3b8' }}>help_outline</span>
-          <p className="text-[11px]" style={{ color: '#94a3b8' }}>
-            {nPreguntas} pregunta{nPreguntas !== 1 ? 's' : ''} / ejercicio{nPreguntas !== 1 ? 's' : ''}
-          </p>
-          {a.fecha_probable && (
-            <span className="ml-auto text-[10px]" style={{ color: '#cbd5e1' }}>
-              {a.fecha_probable}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Footer: preguntas + botón practicar */}
+      <div className="flex items-center gap-1.5 pt-1" style={{ borderTop: '1px solid #f8fafc' }}>
+        {nPreguntas > 0 && (
+          <>
+            <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#94a3b8' }}>help_outline</span>
+            <p className="text-[11px]" style={{ color: '#94a3b8' }}>
+              {nPreguntas} pregunta{nPreguntas !== 1 ? 's' : ''}
+            </p>
+          </>
+        )}
+        {a.fecha_probable && (
+          <span className="text-[10px]" style={{ color: '#cbd5e1' }}>
+            {a.fecha_probable}
+          </span>
+        )}
+        {['prueba', 'guia', 'ejercicio'].includes(a.tipo_contenido ?? '') && a.id && (
+          <div className="ml-auto">
+            <PracticarButton
+              archivoId={a.id}
+              alumno={a.alumno}
+              titulo={a.titulo_inferido ?? a.archivo_nombre}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

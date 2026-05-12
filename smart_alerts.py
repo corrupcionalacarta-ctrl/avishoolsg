@@ -521,6 +521,103 @@ Tono: respetuoso, honesto, orientado a soluciones. No exageres ni suavices los p
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5. DETECCIÓN DE PATRONES DE ANOTACIONES
+# ─────────────────────────────────────────────────────────────────────────────
+
+DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+def check_patron_anotaciones(notify: bool = True) -> list[dict]:
+    """
+    Detecta patrones en anotaciones negativas:
+    - Día de la semana con más anotaciones
+    - Asignatura con más anotaciones
+    - Tendencia (aumentando / disminuyendo en últimas 2 semanas)
+
+    Solo notifica si hay un patrón claro (≥ 3 anotaciones en mismo día o asignatura).
+    """
+    sb = get_sb()
+    hace60 = (date.today() - timedelta(days=60)).isoformat()
+
+    patrones = []
+
+    for alumno in ALUMNOS:
+        nombre = alumno["nombre"]
+        slug   = alumno["slug"]
+
+        anot_r = sb.table("anotaciones").select(
+            "tipo, titulo, asignatura, fecha"
+        ).ilike("alumno", f"%{slug}%").eq("tipo", "negativa").gte(
+            "fecha", hace60
+        ).execute().data or []
+
+        if len(anot_r) < 3:
+            continue
+
+        # Contar por día de la semana
+        por_dia: dict[str, int] = {}
+        por_asig: dict[str, int] = {}
+        hace14 = (date.today() - timedelta(days=14)).isoformat()
+        hace28 = (date.today() - timedelta(days=28)).isoformat()
+        recientes = 0
+        anteriores = 0
+
+        for a in anot_r:
+            if not a.get("fecha"):
+                continue
+            try:
+                d = datetime.strptime(a["fecha"], "%Y-%m-%d")
+                dia = DIAS_ES[d.weekday()]
+                por_dia[dia] = por_dia.get(dia, 0) + 1
+            except ValueError:
+                pass
+
+            asig = (a.get("asignatura") or "Sin asignatura").strip()
+            por_asig[asig] = por_asig.get(asig, 0) + 1
+
+            if a["fecha"] >= hace14:
+                recientes += 1
+            elif a["fecha"] >= hace28:
+                anteriores += 1
+
+        hallazgos = []
+
+        # Patrón por día
+        dia_top, count_dia = max(por_dia.items(), key=lambda x: x[1]) if por_dia else ("", 0)
+        if count_dia >= 3:
+            hallazgos.append(f"📅 {count_dia} anotaciones los <b>{dia_top}</b>")
+
+        # Patrón por asignatura
+        asig_top, count_asig = max(por_asig.items(), key=lambda x: x[1]) if por_asig else ("", 0)
+        if count_asig >= 3 and asig_top != "Sin asignatura":
+            hallazgos.append(f"📚 {count_asig} anotaciones en <b>{asig_top}</b>")
+
+        # Tendencia
+        if recientes > anteriores + 1:
+            hallazgos.append(f"📈 Aumentando: {recientes} en últimas 2 semanas vs {anteriores} en las 2 anteriores")
+        elif anteriores > recientes + 1 and recientes > 0:
+            hallazgos.append(f"📉 Mejorando: {recientes} en últimas 2 semanas vs {anteriores} en las 2 anteriores")
+
+        if hallazgos:
+            patrones.append({"alumno": nombre, "hallazgos": hallazgos, "total": len(anot_r)})
+            log(f"[PATRON] {nombre}: {len(hallazgos)} patrón(es) detectado(s)")
+
+    if notify and patrones:
+        lineas = ["🔍 <b>PATRONES DE CONDUCTA</b> (últimos 60 días)\n"]
+        for p in patrones:
+            nombre_corto = p["alumno"].split()[0]
+            lineas.append(f"<b>{nombre_corto}</b> — {p['total']} anotaciones negativas:")
+            for h in p["hallazgos"]:
+                lineas.append(f"  {h}")
+            lineas.append("")
+        lineas.append("💡 Considera hablar con el profesor de esa asignatura o revisar los días de más estrés")
+        send_telegram("\n".join(lineas))
+    elif notify:
+        log("[PATRON] Sin patrones claros detectados")
+
+    return patrones
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -531,6 +628,7 @@ def main():
     parser.add_argument("--semana",  action="store_true", help="Detector de semana pesada")
     parser.add_argument("--plan",    action="store_true", help="Plan semanal de estudio")
     parser.add_argument("--informe", nargs="?", const=True, metavar="YYYY-MM", help="Informe mensual")
+    parser.add_argument("--patron",  action="store_true", help="Detección de patrones en anotaciones")
     parser.add_argument("--all",     action="store_true", help="Ejecutar todo")
     parser.add_argument("--no-notify", action="store_true", help="No enviar a Telegram")
     args = parser.parse_args()
@@ -549,6 +647,9 @@ def main():
 
     if args.all or args.plan:
         generar_plan_semanal(notify=notify)
+
+    if args.all or args.patron:
+        check_patron_anotaciones(notify=notify)
 
     if args.informe is not None:
         mes = args.informe if isinstance(args.informe, str) else None
